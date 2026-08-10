@@ -1,26 +1,133 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
+@layer base {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    --bg-main: #F9F6F0;
+    --bg-surface: #FFFFFF;
+    --bg-card: #F4F0E8;
+    --text-main: #1C1917;
+    --text-muted: #78716C;
+    --border-main: #E7E5E4;
+    --accent-main: #C95A3B;
+    --accent-hover: #B84A2A;
+    --accent-light: #FDF3F0;
+    --shadow-subtle: 0 4px 20px -2px rgba(28, 25, 23, 0.05);
+
+    /* Reader Theme Variables (Default Light) */
+    --reader-bg: #FFFFFF;
+    --reader-surface: #F9F6F0;
+    --reader-text: #1C1917;
+    --reader-muted: #78716C;
+    --reader-border: #E7E5E4;
+  }
+
+  .dark, .theme-dark {
+    --bg-main: #121110;
+    --bg-surface: #1C1A19;
+    --bg-card: #262422;
+    --text-main: #F5F4F0;
+    --text-muted: #A8A29E;
+    --border-main: #2E2B28;
+    --accent-main: #E07A5F;
+    --accent-hover: #EB8A70;
+    --accent-light: #2C1E1A;
+    --shadow-subtle: 0 4px 20px -2px rgba(0, 0, 0, 0.4);
+
+    --reader-bg: #161514;
+    --reader-surface: #22201E;
+    --reader-text: #F5F4F0;
+    --reader-muted: #B0AAA4;
+    --reader-border: #2E2C2A;
+  }
+
+  .theme-sepia {
+    --reader-bg: #F4ECD8;
+    --reader-surface: #EAE0C7;
+    --reader-text: #3B3228;
+    --reader-muted: #786B5A;
+    --reader-border: #DFD3B8;
   }
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background-color: var(--bg-main);
+  color: var(--text-main);
+  font-family: var(--font-sans), system-ui, sans-serif;
+  overflow-x: hidden;
 }
+
+/* Custom Serif Typography Helper */
+.font-serif-editorial {
+  font-family: var(--font-serif), Georgia, serif;
+}
+
+/* PDF Canvas Layer Customization */
+.pdf-page-container {
+  box-shadow: 0 10px 30px -5px rgba(0, 0, 0, 0.08);
+  transition: box-shadow 0.2s ease, transform 0.2s ease;
+}
+
+/* Custom Highlight Markers */
+.highlight-yellow { background-color: rgba(254, 240, 138, 0.65); border-bottom: 2px solid #facc15; }
+.highlight-green { background-color: rgba(187, 247, 208, 0.65); border-bottom: 2px solid #4ade80; }
+.highlight-blue { background-color: rgba(191, 219, 254, 0.65); border-bottom: 2px solid #60a5fa; }
+.highlight-pink { background-color: rgba(251, 207, 232, 0.65); border-bottom: 2px solid #f472b6; }
+.highlight-orange { background-color: rgba(254, 215, 170, 0.65); border-bottom: 2px solid #fb923c; }
+
+/* Dashboard & Landing Animations */
+@keyframes floatSlow {
+  0%, 100% { transform: translateY(0px) rotate(0deg); }
+  50% { transform: translateY(-8px) rotate(1.5deg); }
+}
+
+.animate-float {
+  animation: floatSlow 6s ease-in-out infinite;
+}
+
+@keyframes pulseGlow {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 0.8; }
+}
+
+.animate-glow {
+  animation: pulseGlow 4s ease-in-out infinite;
+}
+
+/* Scrollbar Customization */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border-main);
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
+}
+
+/* PDF.js Text Layer Styling */
+.textLayer {
+  position: absolute;
+  text-align: initial;
+  left: 0;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  overflow: hidden;
+  opacity: 0.25;
+  line-height: 1;
+}
+
+.textLayer span,
+.textLayer br {
+  color: transparent;
+  position: absolute;
+  white-space: pre;
+  cursor: text;
+  transform-origin: 0% 0%;
+}
+

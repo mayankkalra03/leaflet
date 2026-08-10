@@ -1,0 +1,143 @@
+// Prisma schema for leaflet digital book reader
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String           @id @default(uuid())
+  email        String           @unique
+  name         String
+  passwordHash String
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+  books        Book[]
+  progress     ReadingProgress[]
+  annotations  Annotation[]
+  bookmarks    Bookmark[]
+  stickers     Sticker[]
+  sessions     ReadingSession[]
+  preference   UserPreference?
+}
+
+model Book {
+  id          String            @id @default(uuid())
+  userId      String
+  user        User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title       String
+  author      String            @default("Unknown Author")
+  description String?
+  coverUrl    String?
+  fileUrl     String
+  fileSize    Int               @default(0)
+  totalPages  Int               @default(1)
+  isFavorite  Boolean           @default(false)
+  isDemo      Boolean           @default(false)
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+  progress    ReadingProgress[]
+  annotations Annotation[]
+  bookmarks   Bookmark[]
+  stickers    Sticker[]
+  sessions    ReadingSession[]
+
+  @@index([userId])
+}
+
+model ReadingProgress {
+  id              String   @id @default(uuid())
+  userId          String
+  bookId          String
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  book            Book     @relation(fields: [bookId], references: [id], onDelete: Cascade)
+  currentPage     Int      @default(1)
+  progressPercent Float    @default(0)
+  lastReadAt      DateTime @default(now())
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([userId, bookId])
+}
+
+model Annotation {
+  id           String   @id @default(uuid())
+  userId       String
+  bookId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  book         Book     @relation(fields: [bookId], references: [id], onDelete: Cascade)
+  pageNumber   Int
+  selectedText String
+  textPrefix   String?
+  textSuffix   String?
+  startOffset  Int?
+  endOffset    Int?
+  color        String   @default("#fef08a")
+  note         String?
+  type         String   @default("highlight") // "highlight" | "note"
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([userId, bookId, pageNumber])
+}
+
+model Bookmark {
+  id         String   @id @default(uuid())
+  userId     String
+  bookId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  book       Book     @relation(fields: [bookId], references: [id], onDelete: Cascade)
+  pageNumber Int
+  title      String?
+  note       String?
+  createdAt  DateTime @default(now())
+
+  @@unique([userId, bookId, pageNumber])
+}
+
+model Sticker {
+  id         String   @id @default(uuid())
+  userId     String
+  bookId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  book       Book     @relation(fields: [bookId], references: [id], onDelete: Cascade)
+  pageNumber Int
+  emoji      String
+  xPercent   Float
+  yPercent   Float
+  scale      Float    @default(1.0)
+  rotation   Float    @default(0.0)
+  createdAt  DateTime @default(now())
+
+  @@index([userId, bookId, pageNumber])
+}
+
+model ReadingSession {
+  id              String   @id @default(uuid())
+  userId          String
+  bookId          String
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  book            Book     @relation(fields: [bookId], references: [id], onDelete: Cascade)
+  durationSeconds Int      @default(0)
+  pagesRead       Int      @default(0)
+  sessionDate     String
+  createdAt       DateTime @default(now())
+
+  @@index([userId, sessionDate])
+}
+
+model UserPreference {
+  id             String   @id @default(uuid())
+  userId         String   @unique
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  theme          String   @default("light")
+  readerTheme    String   @default("light")
+  readerZoom     Float    @default(1.0)
+  pageLayoutMode String   @default("continuous")
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}
