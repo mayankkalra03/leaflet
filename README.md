@@ -90,7 +90,7 @@ erDiagram
 
 ### 1. Clone & Install Dependencies
 ```bash
-git clone https://github.com/your-username/leaflet.git
+git clone https://github.com/mayankkalra03/leaflet.git
 cd leaflet
 npm install
 ```
