@@ -63,27 +63,102 @@ export function UploadModal({ isOpen, onClose, onSuccess }: UploadModalProps) {
     setLoading(true);
     setError('');
 
-    const formData = new FormData();
-    formData.append('file', file);
-    formData.append('title', title);
-    formData.append('author', author);
-
     try {
-      const res = await fetch('/api/books', {
-        method: 'POST',
-        body: formData,
-      });
+      // 1. Extract metadata from the PDF
+      let totalPages = 1;
+      let finalTitle = title.trim() || file.name.replace(/\.pdf$/i, '');
+      let finalAuthor = author.trim() || 'Unknown Author';
 
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.error || 'Upload failed');
+      try {
+        const { PDFDocument } = await import('pdf-lib');
+        const buffer = await file.arrayBuffer();
+        const pdfDoc = await PDFDocument.load(buffer, { ignoreEncryption: true });
+        totalPages = pdfDoc.getPageCount();
+        if (!title.trim() && pdfDoc.getTitle()) {
+          finalTitle = pdfDoc.getTitle()!;
+        }
+        if (!author.trim() && pdfDoc.getAuthor()) {
+          finalAuthor = pdfDoc.getAuthor()!;
+        }
+      } catch (pdfErr) {
+        console.warn('PDF metadata extraction warning:', pdfErr);
       }
 
-      setLoading(false);
-      onSuccess();
-      onClose();
+      // 2. Request a signed direct-upload URL (bypasses Vercel 4.5MB serverless limit)
+      const urlRes = await fetch('/api/books/upload-url', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ filename: file.name }),
+      });
+
+      if (urlRes.ok) {
+        const { signedUrl, publicUrl } = await urlRes.json();
+
+        // 3. Upload directly to Supabase Storage via signed URL
+        const uploadFormData = new FormData();
+        uploadFormData.append('cacheControl', '3600');
+        uploadFormData.append('', file);
+
+        const uploadRes = await fetch(signedUrl, {
+          method: 'PUT',
+          body: uploadFormData,
+        });
+
+        if (!uploadRes.ok) {
+          throw new Error('Failed to upload file to cloud storage');
+        }
+
+        // 4. Save book record in database
+        const bookRes = await fetch('/api/books', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            fileUrl: publicUrl,
+            title: finalTitle,
+            author: finalAuthor,
+            totalPages,
+            fileSize: file.size,
+          }),
+        });
+
+        const bookData = await bookRes.json();
+        if (!bookRes.ok) {
+          throw new Error(bookData.error || 'Failed to save book record');
+        }
+
+        setLoading(false);
+        onSuccess();
+        onClose();
+        return;
+      }
+
+      // Fallback for smaller files if signed URL endpoint fails
+      if (file.size <= 4 * 1024 * 1024) {
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('title', finalTitle);
+        formData.append('author', finalAuthor);
+
+        const res = await fetch('/api/books', {
+          method: 'POST',
+          body: formData,
+        });
+
+        const data = await res.json();
+        if (!res.ok) {
+          throw new Error(data.error || 'Upload failed');
+        }
+
+        setLoading(false);
+        onSuccess();
+        onClose();
+        return;
+      }
+
+      const urlData = await urlRes.json();
+      throw new Error(urlData.error || 'Failed to initialize upload');
     } catch (err: any) {
-      setError(err.message);
+      setError(err.message || 'Upload failed');
       setLoading(false);
     }
   };

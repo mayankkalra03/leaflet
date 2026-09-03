@@ -74,53 +74,78 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const formData = await req.formData();
-    const file = formData.get('file') as File | null;
-    const customTitle = formData.get('title') as string | null;
-    const customAuthor = formData.get('author') as string | null;
+    const contentType = req.headers.get('content-type') || '';
 
-    if (!file) {
-      return NextResponse.json({ error: 'No PDF file provided' }, { status: 400 });
-    }
-
-    if (!file.name.toLowerCase().endsWith('.pdf') && file.type !== 'application/pdf') {
-      return NextResponse.json({ error: 'Only PDF files are supported' }, { status: 400 });
-    }
-
-    // 50MB File size limit
-    if (file.size > 50 * 1024 * 1024) {
-      return NextResponse.json({ error: 'File size exceeds maximum limit of 50MB' }, { status: 400 });
-    }
-
-    const bytes = await file.arrayBuffer();
-    const buffer = Buffer.from(bytes);
-
+    let title = '';
+    let author = 'Unknown Author';
+    let fileUrl = '';
+    let fileSize = 0;
     let totalPages = 1;
-    let extractedTitle = customTitle || file.name.replace(/\.pdf$/i, '');
-    let extractedAuthor = customAuthor || 'Unknown Author';
 
-    try {
-      const pdfDoc = await PDFDocument.load(buffer, { ignoreEncryption: true });
-      totalPages = pdfDoc.getPageCount();
-      if (!customTitle && pdfDoc.getTitle()) {
-        extractedTitle = pdfDoc.getTitle()!;
+    if (contentType.includes('application/json')) {
+      // Direct cloud storage upload completion flow (bypasses serverless request size limit)
+      const body = await req.json();
+      fileUrl = body.fileUrl;
+      title = body.title || 'Untitled Book';
+      author = body.author || 'Unknown Author';
+      fileSize = body.fileSize || 0;
+      totalPages = body.totalPages || 1;
+
+      if (!fileUrl) {
+        return NextResponse.json({ error: 'fileUrl is required' }, { status: 400 });
       }
-      if (!customAuthor && pdfDoc.getAuthor()) {
-        extractedAuthor = pdfDoc.getAuthor()!;
+    } else {
+      // Traditional multipart/form-data upload flow
+      const formData = await req.formData();
+      const file = formData.get('file') as File | null;
+      const customTitle = formData.get('title') as string | null;
+      const customAuthor = formData.get('author') as string | null;
+
+      if (!file) {
+        return NextResponse.json({ error: 'No PDF file provided' }, { status: 400 });
       }
-    } catch (pdfErr) {
-      console.warn('PDF metadata extraction warning:', pdfErr);
+
+      if (!file.name.toLowerCase().endsWith('.pdf') && file.type !== 'application/pdf') {
+        return NextResponse.json({ error: 'Only PDF files are supported' }, { status: 400 });
+      }
+
+      // 50MB File size limit
+      if (file.size > 50 * 1024 * 1024) {
+        return NextResponse.json({ error: 'File size exceeds maximum limit of 50MB' }, { status: 400 });
+      }
+
+      fileSize = file.size;
+      const bytes = await file.arrayBuffer();
+      const buffer = Buffer.from(bytes);
+
+      let extractedTitle = customTitle || file.name.replace(/\.pdf$/i, '');
+      let extractedAuthor = customAuthor || 'Unknown Author';
+
+      try {
+        const pdfDoc = await PDFDocument.load(buffer, { ignoreEncryption: true });
+        totalPages = pdfDoc.getPageCount();
+        if (!customTitle && pdfDoc.getTitle()) {
+          extractedTitle = pdfDoc.getTitle()!;
+        }
+        if (!customAuthor && pdfDoc.getAuthor()) {
+          extractedAuthor = pdfDoc.getAuthor()!;
+        }
+      } catch (pdfErr) {
+        console.warn('PDF metadata extraction warning:', pdfErr);
+      }
+
+      title = extractedTitle.trim() || 'Untitled Book';
+      author = extractedAuthor.trim() || 'Unknown Author';
+      fileUrl = await saveFile(buffer, file.name, file.type);
     }
-
-    const fileUrl = await saveFile(buffer, file.name, file.type);
 
     const book = await db.book.create({
       data: {
         userId: session.userId,
-        title: extractedTitle.trim() || 'Untitled Book',
-        author: extractedAuthor.trim() || 'Unknown Author',
+        title: title.trim() || 'Untitled Book',
+        author: author.trim() || 'Unknown Author',
         fileUrl,
-        fileSize: file.size,
+        fileSize,
         totalPages,
       },
     });
@@ -136,8 +161,11 @@ export async function POST(req: Request) {
     });
 
     return NextResponse.json({ book });
-  } catch (error) {
+  } catch (error: any) {
     console.error('Upload book error:', error);
-    return NextResponse.json({ error: 'Failed to upload book' }, { status: 500 });
+    return NextResponse.json(
+      { error: error?.message || 'Failed to upload book' },
+      { status: 500 }
+    );
   }
 }
