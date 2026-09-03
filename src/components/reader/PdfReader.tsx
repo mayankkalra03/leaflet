@@ -124,11 +124,15 @@ export function PdfReader({ book }: PdfReaderProps) {
   } | null>(null);
   const [noteInput, setNoteInput] = useState('');
   const [showNoteField, setShowNoteField] = useState(false);
+  const [showAddPageNote, setShowAddPageNote] = useState(false);
+  const [pageNoteText, setPageNoteText] = useState('');
+  const [pageNoteColor, setPageNoteColor] = useState('#fef08a');
 
   // Canvas Refs
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const textLayerRef = useRef<HTMLDivElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const pageContainerRef = useRef<HTMLDivElement | null>(null);
 
   // Load PDF Document
   useEffect(() => {
@@ -328,19 +332,101 @@ export function PdfReader({ book }: PdfReaderProps) {
           pageNumber: selection.pageNumber,
           selectedText: selection.text,
           color,
-          note: noteInput || null,
-          type: noteInput ? 'note' : 'highlight',
+          note: noteInput.trim() || undefined,
+          type: noteInput.trim() ? 'note' : 'highlight',
         }),
       });
 
       if (res.ok) {
         fetchReaderData();
         setSelection(null);
+        setNoteInput('');
+        setShowNoteField(false);
         window.getSelection()?.removeAllRanges();
       }
     } catch (err) {
       console.error(err);
     }
+  };
+
+  // Create Direct Note on Current Page
+  const handleAddPageNote = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!pageNoteText.trim()) return;
+
+    try {
+      const res = await fetch('/api/annotations', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          bookId: book.id,
+          pageNumber: currentPage,
+          selectedText: `Note on Page ${currentPage}`,
+          color: pageNoteColor,
+          note: pageNoteText.trim(),
+          type: 'note',
+        }),
+      });
+
+      if (res.ok) {
+        setPageNoteText('');
+        setShowAddPageNote(false);
+        fetchReaderData();
+      }
+    } catch (err) {
+      console.error('Failed to add page note:', err);
+    }
+  };
+
+  // Drag & Move Sticker on PDF Canvas
+  const handleStickerPointerDown = (e: React.PointerEvent<HTMLDivElement>, st: StickerItem) => {
+    e.stopPropagation();
+    e.preventDefault();
+
+    const container = pageContainerRef.current;
+    if (!container) return;
+
+    let isMoved = false;
+    const initialRect = container.getBoundingClientRect();
+    let currentX = st.xPercent;
+    let currentY = st.yPercent;
+
+    const onPointerMove = (moveEvent: PointerEvent) => {
+      isMoved = true;
+      const rect = pageContainerRef.current ? pageContainerRef.current.getBoundingClientRect() : initialRect;
+      const xPercent = Math.max(2, Math.min(94, ((moveEvent.clientX - rect.left) / rect.width) * 100));
+      const yPercent = Math.max(2, Math.min(94, ((moveEvent.clientY - rect.top) / rect.height) * 100));
+      currentX = xPercent;
+      currentY = yPercent;
+
+      setStickers((prev) =>
+        prev.map((item) => (item.id === st.id ? { ...item, xPercent, yPercent } : item))
+      );
+    };
+
+    const onPointerUp = async () => {
+      window.removeEventListener('pointermove', onPointerMove);
+      window.removeEventListener('pointerup', onPointerUp);
+
+      if (isMoved) {
+        try {
+          await fetch('/api/stickers', {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              id: st.id,
+              xPercent: Math.round(currentX * 10) / 10,
+              yPercent: Math.round(currentY * 10) / 10,
+            }),
+          });
+        } catch (err) {
+          console.error('Failed to update sticker position:', err);
+        }
+      }
+    };
+
+    window.addEventListener('pointermove', onPointerMove);
+    window.addEventListener('pointerup', onPointerUp);
   };
 
   // Toggle Page Bookmark
@@ -744,9 +830,63 @@ export function PdfReader({ book }: PdfReaderProps) {
               {/* ANNOTATIONS TAB */}
               {activeTab === 'annotations' && (
                 <div className="space-y-3">
-                  <h3 className="text-xs font-extrabold uppercase tracking-wider text-[var(--reader-muted)]">Highlights & Notes</h3>
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-xs font-extrabold uppercase tracking-wider text-[var(--reader-muted)]">Highlights & Notes</h3>
+                    <button
+                      onClick={() => setShowAddPageNote(!showAddPageNote)}
+                      className="px-2.5 py-1 rounded-lg bg-[var(--accent-main)] text-[var(--bg-main)] text-xs font-bold hover:opacity-90 transition-opacity flex items-center gap-1 shadow-xs"
+                      title="Add note to current page"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>Note</span>
+                    </button>
+                  </div>
+
+                  {/* Inline Add Page Note Form */}
+                  {showAddPageNote && (
+                    <form onSubmit={handleAddPageNote} className="p-3 rounded-xl border border-[var(--accent-main)]/40 bg-[var(--reader-surface)] space-y-2.5 animate-fadeIn shadow-xs">
+                      <div className="flex items-center justify-between text-xs font-bold text-[var(--reader-muted)]">
+                        <span>Note on Page {currentPage}</span>
+                        <div className="flex items-center gap-1">
+                          {HIGHLIGHT_COLORS.map((c) => (
+                            <button
+                              key={c.name}
+                              type="button"
+                              onClick={() => setPageNoteColor(c.value)}
+                              className={`w-3.5 h-3.5 rounded-full ${c.class} ${pageNoteColor === c.value ? 'ring-2 ring-offset-1 ring-[var(--accent-main)]' : ''}`}
+                            />
+                          ))}
+                        </div>
+                      </div>
+                      <textarea
+                        rows={3}
+                        value={pageNoteText}
+                        onChange={(e) => setPageNoteText(e.target.value)}
+                        placeholder={`Write your thoughts for page ${currentPage}...`}
+                        className="w-full p-2 rounded-lg bg-black/5 dark:bg-white/10 text-xs text-[var(--reader-text)] border border-[var(--reader-border)] focus:outline-none focus:ring-1 focus:ring-[var(--accent-main)] resize-none"
+                        autoFocus
+                      />
+                      <div className="flex items-center justify-end gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setShowAddPageNote(false)}
+                          className="px-2 py-1 text-xs text-[var(--reader-muted)] hover:text-[var(--reader-text)]"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="submit"
+                          disabled={!pageNoteText.trim()}
+                          className="px-3 py-1 rounded-lg bg-[var(--accent-main)] text-[var(--bg-main)] text-xs font-bold disabled:opacity-50"
+                        >
+                          Save Note
+                        </button>
+                      </div>
+                    </form>
+                  )}
+
                   {annotations.length === 0 ? (
-                    <p className="text-xs text-[var(--reader-muted)] italic">Select any text on a page to create your first highlight or note.</p>
+                    <p className="text-xs text-[var(--reader-muted)] italic">Click "+ Note" above or select any text on a page to create your first note.</p>
                   ) : (
                     annotations.map((ann) => (
                       <div
@@ -861,7 +1001,10 @@ export function PdfReader({ book }: PdfReaderProps) {
           className="flex-1 h-full min-h-0 overflow-auto p-4 sm:p-8 flex justify-center items-start bg-[var(--bg-main)] relative"
         >
           {/* PDF Page Container */}
-          <div className="pdf-page-container relative bg-white dark:bg-stone-900 border border-[var(--reader-border)] rounded-sm shadow-2xl overflow-hidden">
+          <div
+            ref={pageContainerRef}
+            className="pdf-page-container relative bg-white dark:bg-stone-900 border border-[var(--reader-border)] rounded-sm shadow-2xl overflow-hidden"
+          >
             {/* Canvas */}
             <canvas ref={canvasRef} className="block" />
 
@@ -872,15 +1015,29 @@ export function PdfReader({ book }: PdfReaderProps) {
             {currentStickers.map((st) => (
               <div
                 key={st.id}
+                onPointerDown={(e) => handleStickerPointerDown(e, st)}
                 style={{
                   position: 'absolute',
                   left: `${st.xPercent}%`,
                   top: `${st.yPercent}%`,
-                  transform: `scale(${st.scale}) rotate(${st.rotation}deg)`,
+                  transform: `translate(-50%, -50%) scale(${st.scale}) rotate(${st.rotation}deg)`,
+                  touchAction: 'none',
                 }}
-                className="text-3xl cursor-grab hover:scale-125 transition-transform z-10 filter drop-shadow-md"
+                className="text-3xl cursor-grab active:cursor-grabbing hover:scale-125 transition-transform z-20 filter drop-shadow-md select-none group"
+                title="Drag to reposition sticker"
               >
-                {st.emoji}
+                <span>{st.emoji}</span>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleDeleteSticker(st.id);
+                  }}
+                  className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-red-500 text-white rounded-full text-[10px] hidden group-hover:flex items-center justify-center shadow-md hover:bg-red-600 transition-colors"
+                  title="Remove sticker"
+                >
+                  ✕
+                </button>
               </div>
             ))}
 
@@ -896,6 +1053,9 @@ export function PdfReader({ book }: PdfReaderProps) {
           {selection && (
             <div
               style={{ left: `${selection.x}px`, top: `${selection.y}px` }}
+              onMouseDown={(e) => e.stopPropagation()}
+              onMouseUp={(e) => e.stopPropagation()}
+              onClick={(e) => e.stopPropagation()}
               className="absolute -translate-x-1/2 -translate-y-full mb-2 bg-stone-900 text-white rounded-xl shadow-2xl p-2 z-40 space-y-2 animate-fadeIn border border-stone-700"
             >
               <div className="flex items-center gap-1.5">
@@ -930,6 +1090,7 @@ export function PdfReader({ book }: PdfReaderProps) {
                     onChange={(e) => setNoteInput(e.target.value)}
                     placeholder="Attach your note..."
                     className="w-full p-2 rounded-lg bg-stone-800 text-white text-xs border border-stone-700 focus:outline-none"
+                    autoFocus
                   />
                   <button
                     onClick={() => handleSaveHighlight('#fef08a')}

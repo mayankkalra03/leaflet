@@ -26,13 +26,13 @@ export const progressSchema = z.object({
 export const annotationSchema = z.object({
   bookId: z.string().uuid(),
   pageNumber: z.number().int().min(1),
-  selectedText: z.string().min(1),
-  textPrefix: z.string().optional(),
-  textSuffix: z.string().optional(),
-  startOffset: z.number().int().optional(),
-  endOffset: z.number().int().optional(),
+  selectedText: z.string().optional().default('Page Note'),
+  textPrefix: z.string().optional().nullable(),
+  textSuffix: z.string().optional().nullable(),
+  startOffset: z.number().int().optional().nullable(),
+  endOffset: z.number().int().optional().nullable(),
   color: z.string().default('#fef08a'),
-  note: z.string().optional(),
+  note: z.string().optional().nullable(),
   type: z.enum(['highlight', 'note']).default('highlight'),
 });
 
