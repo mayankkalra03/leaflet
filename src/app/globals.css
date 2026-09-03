@@ -109,7 +109,7 @@ body {
   background: var(--text-muted);
 }
 
-/* PDF.js Text Layer Styling */
+/* PDF.js Text Layer & Selection Styling */
 .textLayer {
   position: absolute;
   text-align: initial;
@@ -118,16 +118,50 @@ body {
   right: 0;
   bottom: 0;
   overflow: hidden;
-  opacity: 0.25;
+  opacity: 1 !important;
   line-height: 1;
+  -webkit-text-size-adjust: none;
+  -moz-text-size-adjust: none;
+  text-size-adjust: none;
+  forced-color-adjust: none;
+  transform-origin: 0 0;
+  z-index: 2;
+  pointer-events: auto;
 }
 
 .textLayer span,
 .textLayer br {
-  color: transparent;
+  color: transparent !important;
   position: absolute;
   white-space: pre;
   cursor: text;
   transform-origin: 0% 0%;
 }
+
+.textLayer ::selection {
+  background: rgba(251, 191, 36, 0.45) !important;
+  color: transparent !important;
+}
+
+.textLayer ::-moz-selection {
+  background: rgba(251, 191, 36, 0.45) !important;
+  color: transparent !important;
+}
+
+/* PDF.js Annotation Layer for Interactive Hyperlinks */
+.annotationLayer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  pointer-events: none;
+  transform-origin: 0 0;
+  z-index: 3;
+}
+
+.annotationLayer a {
+  pointer-events: auto;
+}
+
 

@@ -128,11 +128,15 @@ export function PdfReader({ book }: PdfReaderProps) {
   const [pageNoteText, setPageNoteText] = useState('');
   const [pageNoteColor, setPageNoteColor] = useState('#fef08a');
 
-  // Canvas Refs
+  // Canvas & Layer Refs
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const textLayerRef = useRef<HTMLDivElement | null>(null);
+  const annotationLayerRef = useRef<HTMLDivElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const pageContainerRef = useRef<HTMLDivElement | null>(null);
+  const currentRenderTaskRef = useRef<any>(null);
+  const currentTextLayerTaskRef = useRef<any>(null);
+  const [hasTextContent, setHasTextContent] = useState(true);
 
   // Load PDF Document
   useEffect(() => {
@@ -246,11 +250,31 @@ export function PdfReader({ book }: PdfReaderProps) {
     async (pageNumber: number) => {
       if (!pdfDoc || !canvasRef.current || !textLayerRef.current) return;
 
+      // Cancel previous ongoing operations
+      if (currentRenderTaskRef.current) {
+        try {
+          currentRenderTaskRef.current.cancel();
+        } catch {
+          // ignore
+        }
+        currentRenderTaskRef.current = null;
+      }
+
+      if (currentTextLayerTaskRef.current) {
+        try {
+          currentTextLayerTaskRef.current.cancel();
+        } catch {
+          // ignore
+        }
+        currentTextLayerTaskRef.current = null;
+      }
+
       try {
         const page = await pdfDoc.getPage(pageNumber);
         const viewport = page.getViewport({ scale });
 
         const canvas = canvasRef.current;
+        if (!canvas) return;
         const context = canvas.getContext('2d');
 
         if (!context) return;
@@ -264,28 +288,106 @@ export function PdfReader({ book }: PdfReaderProps) {
 
         const transform = outputScale !== 1 ? [outputScale, 0, 0, outputScale, 0, 0] : null;
 
-        await page.render({
+        const renderTask = page.render({
           canvasContext: context,
           transform: transform || undefined,
           viewport,
-        }).promise;
+        });
+
+        currentRenderTaskRef.current = renderTask;
+
+        try {
+          await renderTask.promise;
+        } catch (renderErr: any) {
+          if (renderErr?.name === 'RenderingCancelledException') {
+            return;
+          }
+          throw renderErr;
+        } finally {
+          if (currentRenderTaskRef.current === renderTask) {
+            currentRenderTaskRef.current = null;
+          }
+        }
 
         // Render Text Layer for Text Selection
         const textLayerDiv = textLayerRef.current;
-        textLayerDiv.innerHTML = '';
-        textLayerDiv.style.width = `${Math.floor(viewport.width)}px`;
-        textLayerDiv.style.height = `${Math.floor(viewport.height)}px`;
-        textLayerDiv.style.setProperty('--scale-factor', `${viewport.scale}`);
+        if (textLayerDiv) {
+          textLayerDiv.innerHTML = '';
+          textLayerDiv.style.width = `${Math.floor(viewport.width)}px`;
+          textLayerDiv.style.height = `${Math.floor(viewport.height)}px`;
+          textLayerDiv.style.setProperty('--scale-factor', `${viewport.scale}`);
 
-        const textContent = await page.getTextContent();
-        pdfjsLib.renderTextLayer({
-          textContentSource: textContent,
-          container: textLayerDiv,
-          viewport,
-          textDivs: [],
-        });
-      } catch (err) {
-        console.error('Render page error:', err);
+          const textContent = await page.getTextContent();
+          const hasText = textContent.items && textContent.items.length > 0;
+          setHasTextContent(hasText);
+
+          if (hasText) {
+            const textTask = pdfjsLib.renderTextLayer({
+              textContentSource: textContent,
+              container: textLayerDiv,
+              viewport,
+              textDivs: [],
+            });
+            currentTextLayerTaskRef.current = textTask;
+          }
+        }
+
+        // Render Annotation Layer for Clickable Links
+        const annotationLayerDiv = annotationLayerRef.current;
+        if (annotationLayerDiv) {
+          annotationLayerDiv.innerHTML = '';
+          annotationLayerDiv.style.width = `${Math.floor(viewport.width)}px`;
+          annotationLayerDiv.style.height = `${Math.floor(viewport.height)}px`;
+
+          const annotations = await page.getAnnotations();
+          for (const item of annotations) {
+            if (item.subtype === 'Link' && item.rect) {
+              const rect = viewport.convertToViewportRectangle(item.rect);
+              const minX = Math.min(rect[0], rect[2]);
+              const minY = Math.min(rect[1], rect[3]);
+              const width = Math.abs(rect[2] - rect[0]);
+              const height = Math.abs(rect[3] - rect[1]);
+
+              const linkEl = document.createElement('a');
+              linkEl.style.position = 'absolute';
+              linkEl.style.left = `${minX}px`;
+              linkEl.style.top = `${minY}px`;
+              linkEl.style.width = `${width}px`;
+              linkEl.style.height = `${height}px`;
+              linkEl.style.display = 'block';
+              linkEl.style.cursor = 'pointer';
+              linkEl.style.zIndex = '10';
+              linkEl.className = 'hover:bg-blue-500/15 rounded-xs transition-colors';
+
+              if (item.url) {
+                linkEl.href = item.url;
+                linkEl.target = '_blank';
+                linkEl.rel = 'noopener noreferrer';
+                linkEl.title = `Open link: ${item.url}`;
+              } else if (item.dest) {
+                linkEl.title = 'Jump to section';
+                linkEl.onclick = async (e) => {
+                  e.preventDefault();
+                  try {
+                    const destRef = typeof item.dest === 'string' ? await pdfDoc.getDestination(item.dest) : item.dest;
+                    if (Array.isArray(destRef) && destRef[0]) {
+                      const destIndex = await pdfDoc.getPageIndex(destRef[0]);
+                      setCurrentPage(destIndex + 1);
+                    }
+                  } catch (err) {
+                    console.warn('Destination jump error:', err);
+                  }
+                };
+              }
+
+              annotationLayerDiv.appendChild(linkEl);
+            }
+          }
+        }
+      } catch (err: any) {
+        if (err?.name !== 'RenderingCancelledException') {
+          console.error('Render page error:', err);
+        }
       }
     },
     [pdfDoc, scale]
@@ -293,6 +395,22 @@ export function PdfReader({ book }: PdfReaderProps) {
 
   useEffect(() => {
     renderPage(currentPage);
+    return () => {
+      if (currentRenderTaskRef.current) {
+        try {
+          currentRenderTaskRef.current.cancel();
+        } catch {
+          // ignore
+        }
+      }
+      if (currentTextLayerTaskRef.current) {
+        try {
+          currentTextLayerTaskRef.current.cancel();
+        } catch {
+          // ignore
+        }
+      }
+    };
   }, [currentPage, renderPage]);
 
   // Handle Text Selection in PDF Canvas
@@ -1009,7 +1127,10 @@ export function PdfReader({ book }: PdfReaderProps) {
             <canvas ref={canvasRef} className="block" />
 
             {/* Text Selection Layer */}
-            <div ref={textLayerRef} className="textLayer absolute inset-0 opacity-20 pointer-events-auto" />
+            <div ref={textLayerRef} className="textLayer absolute inset-0 pointer-events-auto" />
+
+            {/* Interactive PDF Link Layer */}
+            <div ref={annotationLayerRef} className="annotationLayer absolute inset-0 pointer-events-none" />
 
             {/* Sticker Overlay Icons */}
             {currentStickers.map((st) => (
@@ -1048,6 +1169,14 @@ export function PdfReader({ book }: PdfReaderProps) {
               </div>
             )}
           </div>
+
+          {/* Cover / Scanned Image Page Notice */}
+          {!hasTextContent && (
+            <div className="absolute bottom-5 left-1/2 -translate-x-1/2 bg-stone-900/90 text-white text-xs px-4 py-2 rounded-full shadow-2xl border border-stone-700 flex items-center gap-2 z-30 animate-fadeIn pointer-events-none">
+              <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse shrink-0" />
+              <span className="font-medium">Cover / image page (no selectable text) — press Next (→) to start reading and highlighting</span>
+            </div>
+          )}
 
           {/* Contextual Text Highlight Popover */}
           {selection && (
