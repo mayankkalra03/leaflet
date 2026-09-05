@@ -126,26 +126,42 @@ body {
   forced-color-adjust: none;
   transform-origin: 0 0;
   z-index: 2;
-  pointer-events: auto;
+  pointer-events: auto !important;
+  user-select: text !important;
+  -webkit-user-select: text !important;
+  mix-blend-mode: multiply;
 }
 
-.textLayer span,
-.textLayer br {
+.textLayer :is(span, br) {
   color: transparent !important;
+  -webkit-text-fill-color: transparent !important;
   position: absolute;
   white-space: pre;
-  cursor: text;
+  cursor: text !important;
   transform-origin: 0% 0%;
+  pointer-events: auto !important;
+  user-select: text !important;
+  -webkit-user-select: text !important;
 }
 
-.textLayer ::selection {
+.textLayer ::selection,
+.textLayer *::selection {
   background: rgba(251, 191, 36, 0.45) !important;
   color: transparent !important;
+  -webkit-text-fill-color: transparent !important;
+  text-shadow: none !important;
 }
 
-.textLayer ::-moz-selection {
+.textLayer ::-moz-selection,
+.textLayer *::-moz-selection {
   background: rgba(251, 191, 36, 0.45) !important;
   color: transparent !important;
+  text-shadow: none !important;
+}
+
+.textLayer br::selection,
+.textLayer br::-moz-selection {
+  background: transparent !important;
 }
 
 /* PDF.js Annotation Layer for Interactive Hyperlinks */
@@ -162,6 +178,26 @@ body {
 
 .annotationLayer a {
   pointer-events: auto;
+}
+
+/* Precise Highlight Styling */
+.leaflet-highlight {
+  mix-blend-mode: multiply;
+  color: transparent !important;
+  border-radius: 2px;
+  padding: 0;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+
+.theme-dark .textLayer {
+  mix-blend-mode: normal;
+}
+
+.theme-dark .leaflet-highlight {
+  mix-blend-mode: screen;
+  color: transparent !important;
+  opacity: 0.85;
 }
 
 

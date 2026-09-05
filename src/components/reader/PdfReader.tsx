@@ -137,6 +137,7 @@ export function PdfReader({ book }: PdfReaderProps) {
   const currentRenderTaskRef = useRef<any>(null);
   const currentTextLayerTaskRef = useRef<any>(null);
   const [hasTextContent, setHasTextContent] = useState(true);
+  const [textLayerReadyKey, setTextLayerReadyKey] = useState(0);
 
   // Load PDF Document
   useEffect(() => {
@@ -329,6 +330,8 @@ export function PdfReader({ book }: PdfReaderProps) {
               textDivs: [],
             });
             currentTextLayerTaskRef.current = textTask;
+            await textTask.promise;
+            setTextLayerReadyKey((k) => k + 1);
           }
         }
 
@@ -413,6 +416,191 @@ export function PdfReader({ book }: PdfReaderProps) {
     };
   }, [currentPage, renderPage]);
 
+  // Visually highlight saved passages in text layer across single and multi-line spans
+  useEffect(() => {
+    const textLayerDiv = textLayerRef.current;
+    if (!textLayerDiv) return;
+
+    const pageAnns = annotations.filter((a) => a.pageNumber === currentPage);
+    const spans = Array.from(textLayerDiv.querySelectorAll('span'));
+    if (spans.length === 0) return;
+
+    // Restore original text content to clear previous marks
+    spans.forEach((span) => {
+      if (span.dataset.rawText !== undefined) {
+        span.textContent = span.dataset.rawText;
+      } else {
+        span.dataset.rawText = span.textContent || '';
+      }
+    });
+
+    if (pageAnns.length === 0) return;
+
+    const escapeRegExp = (str: string) => str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const normalizeForSearch = (str: string) =>
+      str
+        .replace(/[\u2018\u2019]/g, "'")
+        .replace(/[\u201C\u201D]/g, '"')
+        .replace(/\u00A0/g, ' ');
+
+    // Build contiguous representation of page text across all spans
+    let combinedText = '';
+    const charMap: Array<{ spanIndex: number; charIndex: number } | null> = [];
+
+    for (let sIdx = 0; sIdx < spans.length; sIdx++) {
+      const span = spans[sIdx];
+      const raw = span.dataset.rawText || '';
+      if (!raw) continue;
+
+      if (combinedText.length > 0 && !/\s$/.test(combinedText) && !/^\s/.test(raw)) {
+        combinedText += ' ';
+        charMap.push(null);
+      }
+
+      for (let cIdx = 0; cIdx < raw.length; cIdx++) {
+        combinedText += raw[cIdx];
+        charMap.push({ spanIndex: sIdx, charIndex: cIdx });
+      }
+    }
+
+    if (!combinedText) return;
+
+    const normCombined = normalizeForSearch(combinedText);
+    const usedRanges: Array<{ start: number; end: number }> = [];
+    const spanIntervals = new Map<number, Array<{ start: number; end: number; color: string }>>();
+
+    pageAnns.forEach((ann) => {
+      const target = ann.selectedText?.trim();
+      if (!target || target.toLowerCase() === 'page note' || target.startsWith('Note on Page')) return;
+
+      const normTarget = normalizeForSearch(target);
+      const tokens = normTarget.split(/\s+/).filter(Boolean);
+      if (tokens.length === 0) return;
+
+      const isSingleWord = tokens.length === 1 && /^[\w'-]+$/u.test(tokens[0]);
+      const pattern = isSingleWord
+        ? `\\b(${escapeRegExp(tokens[0])})\\b`
+        : tokens.map((t) => escapeRegExp(t)).join('\\s+');
+
+      let regex: RegExp;
+      try {
+        regex = new RegExp(pattern, 'gi');
+      } catch {
+        return;
+      }
+
+      let match: RegExpExecArray | null = null;
+      let chosenMatch: RegExpExecArray | null = null;
+
+      while ((match = regex.exec(normCombined)) !== null) {
+        const start = match.index;
+        const end = start + match[0].length;
+        const alreadyUsed = usedRanges.some((r) => Math.max(r.start, start) < Math.min(r.end, end));
+        if (!alreadyUsed) {
+          chosenMatch = match;
+          break;
+        }
+        if (!chosenMatch) {
+          chosenMatch = match;
+        }
+      }
+
+      if (!chosenMatch) return;
+
+      const matchStart = chosenMatch.index;
+      const matchEnd = matchStart + chosenMatch[0].length;
+      usedRanges.push({ start: matchStart, end: matchEnd });
+
+      let currentSpan = -1;
+      let rangeStart = -1;
+      let rangeEnd = -1;
+
+      const flush = () => {
+        if (currentSpan !== -1 && rangeStart !== -1 && rangeEnd > rangeStart) {
+          if (!spanIntervals.has(currentSpan)) {
+            spanIntervals.set(currentSpan, []);
+          }
+          spanIntervals.get(currentSpan)!.push({
+            start: rangeStart,
+            end: rangeEnd,
+            color: ann.color || '#fef08a',
+          });
+        }
+      };
+
+      for (let k = matchStart; k < matchEnd; k++) {
+        const m = charMap[k];
+        if (m) {
+          if (m.spanIndex !== currentSpan) {
+            flush();
+            currentSpan = m.spanIndex;
+            rangeStart = m.charIndex;
+            rangeEnd = m.charIndex + 1;
+          } else {
+            if (m.charIndex === rangeEnd) {
+              rangeEnd = m.charIndex + 1;
+            } else {
+              flush();
+              rangeStart = m.charIndex;
+              rangeEnd = m.charIndex + 1;
+            }
+          }
+        }
+      }
+      flush();
+    });
+
+    const escapeHtml = (str: string) =>
+      str
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+
+    for (const [sIdx, intervals] of spanIntervals.entries()) {
+      const span = spans[sIdx];
+      if (!span) continue;
+      const raw = span.dataset.rawText || '';
+      if (!raw) continue;
+
+      intervals.sort((a, b) => a.start - b.start);
+
+      // Merge / clip overlaps
+      const merged: Array<{ start: number; end: number; color: string }> = [];
+      for (const iv of intervals) {
+        if (merged.length === 0) {
+          merged.push({ ...iv });
+        } else {
+          const prev = merged[merged.length - 1];
+          if (iv.start < prev.end) {
+            if (iv.end > prev.end) {
+              merged.push({ start: prev.end, end: iv.end, color: iv.color });
+            }
+          } else {
+            merged.push({ ...iv });
+          }
+        }
+      }
+
+      let html = '';
+      let lastIdx = 0;
+      for (const iv of merged) {
+        if (iv.start > lastIdx) {
+          html += escapeHtml(raw.slice(lastIdx, iv.start));
+        }
+        html += `<mark class="leaflet-highlight" style="background-color: ${iv.color}">${escapeHtml(
+          raw.slice(iv.start, iv.end)
+        )}</mark>`;
+        lastIdx = iv.end;
+      }
+      if (lastIdx < raw.length) {
+        html += escapeHtml(raw.slice(lastIdx));
+      }
+      span.innerHTML = html;
+    }
+  }, [annotations, currentPage, hasTextContent, textLayerReadyKey]);
+
   // Handle Text Selection in PDF Canvas
   const handleMouseUp = () => {
     const windowSel = window.getSelection();
@@ -425,11 +613,12 @@ export function PdfReader({ book }: PdfReaderProps) {
     const rect = range.getBoundingClientRect();
 
     if (rect && containerRef.current) {
-      const containerRect = containerRef.current.getBoundingClientRect();
+      const container = containerRef.current;
+      const containerRect = container.getBoundingClientRect();
       setSelection({
         text: selectedText,
-        x: rect.left - containerRect.left + rect.width / 2,
-        y: rect.top - containerRect.top - 10,
+        x: rect.left - containerRect.left + container.scrollLeft + rect.width / 2,
+        y: rect.top - containerRect.top + container.scrollTop - 10,
         pageNumber: currentPage,
       });
       setShowNoteField(false);
@@ -695,7 +884,7 @@ export function PdfReader({ book }: PdfReaderProps) {
   const currentAnnotations = annotations.filter((a) => a.pageNumber === currentPage);
 
   return (
-    <div className={`h-screen max-h-screen w-screen overflow-hidden flex flex-col font-sans theme-${readerTheme} transition-colors duration-200 select-none`}>
+    <div className={`h-screen max-h-screen w-screen overflow-hidden flex flex-col font-sans theme-${readerTheme} transition-colors duration-200`}>
       {/* --- READER HEADER TOOLBAR --- */}
       <header className="h-14 shrink-0 border-b border-[var(--reader-border)] bg-[var(--reader-bg)] px-3 sm:px-4 flex items-center justify-between z-30 shadow-xs text-[var(--reader-text)] transition-colors">
         {/* Left: Back & Title */}
@@ -1027,7 +1216,13 @@ export function PdfReader({ book }: PdfReaderProps) {
                           </button>
                         </div>
 
-                        <p className="italic font-serif-editorial text-[var(--reader-text)] bg-amber-500/15 p-2 rounded-lg border-l-2 border-amber-500">
+                        <p
+                          className="italic font-serif-editorial text-[var(--reader-text)] p-2 rounded-lg border-l-2"
+                          style={{
+                            backgroundColor: `${ann.color || '#fef08a'}25`,
+                            borderLeftColor: ann.color || '#fef08a',
+                          }}
+                        >
                           "{ann.selectedText}"
                         </p>
 
