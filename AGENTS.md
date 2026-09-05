@@ -7,3 +7,10 @@ This version has breaking changes — APIs, conventions, and file structure may 
 This block is written and re-added by `next dev` — verify at `node_modules/next/dist/server/lib/generate-agent-files.js`. Removing it from a diff only re-creates the uncommitted change; committing it with your work keeps the tree clean.
 
 <!-- END:nextjs-agent-rules -->
+
+# Project Guidelines
+
+## Testing & Browser Automation
+- **Do NOT automatically launch the browser or use `browser_subagent` to test changes.**
+- Only open or interact with the browser if the user explicitly asks to test or verify in the browser.
+- Validate changes using type checks (`tsc --noEmit`), build tools, terminal tests, and code inspection instead.
