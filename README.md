@@ -31,8 +31,9 @@
 
 ## ✨ Key Features
 
-- 📖 **High-Performance PDF Engine**: Canvas-based PDF rendering with sub-pixel text layer extraction, dynamic scale calculation, and Fit Width / Fit Page modes.
-- ✍️ **Contextual Highlighting & Marginalia**: Highlight text in 5 warm colors (Yellow, Green, Blue, Pink, Orange) and attach sticky notes.
+- 📖 **High-Performance PDF Engine**: Canvas-based PDF rendering with sub-pixel text layer extraction, multi-span text highlight matching, interactive hyperlink navigation, and Fit Width / Fit Page modes.
+- ☁️ **Direct Cloud Storage Uploads**: Client-side signed URL uploads directly to Supabase Storage, bypassing API server body limits for large PDF books.
+- ✍️ **Contextual Highlighting & Marginalia**: Highlight text in 5 warm colors (Yellow, Green, Blue, Pink, Orange) across single or multi-span text nodes and attach sticky notes.
 - 🎨 **Interactive Drag-and-Drop Page Stickers**: Place emoji stickers (⭐ ❤️ 💡 🔥 ❗ 🤔 😂 📌) anywhere on a book page with normalized percentage coordinate persistence.
 - 🔍 **Document TOC & Full-Text Search**: Chronologically sorted chapter tree outline with deep content text searching and snippet preview targets.
 - 📑 **Bookmarks & Reading Progress**: Resume exact page reading progress with debounced persistence and reading percentage indicators.
@@ -80,7 +81,8 @@ erDiagram
 | **Framework** | Next.js 16 (App Router, Server Actions, API Route Handlers) |
 | **Language** | TypeScript (Strict type checking) |
 | **Styling** | Tailwind CSS v4 + Custom CSS Design Tokens |
-| **Database & ORM** | PostgreSQL (Supabase) + Prisma ORM |
+| **Database & ORM** | PostgreSQL (Supabase) + Prisma ORM + RLS Security Policies |
+| **Cloud Storage** | Supabase Storage (`@supabase/supabase-js`) for direct PDF uploads |
 | **Authentication** | Server-side JWT HTTP-only Cookies + bcryptjs Password Hashing |
 | **PDF Rendering** | `pdfjs-dist` (Canvas & Text Layer) + `pdf-lib` (Metadata) |
 
@@ -106,6 +108,10 @@ Set your local `.env`:
 DATABASE_URL="postgresql://user:password@localhost:5432/leaflet"
 JWT_SECRET="your_secure_jwt_secret_key_here"
 NEXT_PUBLIC_APP_URL="http://localhost:3000"
+
+# Supabase Storage (for PDF uploads)
+SUPABASE_URL="https://your-project-id.supabase.co"
+SUPABASE_SERVICE_ROLE_KEY="your-supabase-service-role-secret"
 ```
 
 ### 3. Initialize Database & Run
@@ -119,10 +125,13 @@ Open [http://localhost:3000](http://localhost:3000) in your browser.
 
 ## 💡 Engineering Highlights
 
+- **Direct Cloud Storage Presigned Uploads**: Large PDF file uploads bypass API Route body limits by generating short-lived Supabase Storage presigned upload URLs directly from the client.
+- **Multi-Span Highlight Matching**: Highlighting engine accurately maps selection ranges across complex nested DOM sub-elements and line breaks without breaking text flow.
 - **Normalized Percentage Coordinate System**: Page stickers store relative `xPercent` and `yPercent` positions rather than static pixel offsets, ensuring stickers remain perfectly positioned across all device viewport sizes, tablet screens, and zoom scales.
 - **Debounced Progress Persistence**: To prevent database request throttling during rapid page flipping, reading progress updates are debounced on the client (800ms window).
 - **Sub-Pixel High DPI Canvas Scaling**: Calculates hardware device pixel ratio (`window.devicePixelRatio`) to render crystal-clear PDF typography without blurriness on Retina displays.
 - **Chronological TOC Outline Sorting**: Automatically extracts nested document outline node trees and orders chapter entries chronologically by page number.
+- **Interactive PDF Annotations & Render Locking**: Handles PDF hyperlink navigation safely while acquiring and canceling concurrent PDF.js page render tasks cleanly.
 
 ---
 
