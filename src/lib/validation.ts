@@ -47,6 +47,7 @@ export const stickerSchema = z.object({
   bookId: z.string().uuid(),
   pageNumber: z.number().int().min(1),
   emoji: z.string().min(1),
+  note: z.string().optional().nullable(),
   xPercent: z.number().min(0).max(100),
   yPercent: z.number().min(0).max(100),
   scale: z.number().default(1.0),

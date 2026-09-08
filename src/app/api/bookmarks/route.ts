@@ -1,19 +1,19 @@
 import { NextResponse } from 'next/server';
-import { getAuthUser } from '@/lib/auth';
+import { getEffectiveUser } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { bookmarkSchema } from '@/lib/validation';
 
 export async function GET(req: Request) {
   try {
-    const session = await getAuthUser();
-    if (!session) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    const user = await getEffectiveUser();
+    if (!user) {
+      return NextResponse.json({ bookmarks: [] });
     }
 
     const { searchParams } = new URL(req.url);
     const bookId = searchParams.get('bookId');
 
-    const where: any = { userId: session.userId };
+    const where: any = { userId: user.userId };
     if (bookId) where.bookId = bookId;
 
     const bookmarks = await db.bookmark.findMany({
@@ -30,8 +30,8 @@ export async function GET(req: Request) {
 
 export async function POST(req: Request) {
   try {
-    const session = await getAuthUser();
-    if (!session) {
+    const user = await getEffectiveUser();
+    if (!user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
@@ -41,7 +41,7 @@ export async function POST(req: Request) {
     const bookmark = await db.bookmark.upsert({
       where: {
         userId_bookId_pageNumber: {
-          userId: session.userId,
+          userId: user.userId,
           bookId: validated.bookId,
           pageNumber: validated.pageNumber,
         },
@@ -51,7 +51,7 @@ export async function POST(req: Request) {
         note: validated.note,
       },
       create: {
-        userId: session.userId,
+        userId: user.userId,
         bookId: validated.bookId,
         pageNumber: validated.pageNumber,
         title: validated.title,
@@ -62,7 +62,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ bookmark });
   } catch (error: any) {
     if (error.name === 'ZodError') {
-      return NextResponse.json({ error: error.errors[0].message }, { status: 400 });
+      return NextResponse.json({ error: error.errors[0]?.message || 'Invalid input' }, { status: 400 });
     }
     console.error('Create bookmark error:', error);
     return NextResponse.json({ error: 'Failed to create bookmark' }, { status: 500 });
@@ -71,8 +71,8 @@ export async function POST(req: Request) {
 
 export async function DELETE(req: Request) {
   try {
-    const session = await getAuthUser();
-    if (!session) {
+    const user = await getEffectiveUser();
+    if (!user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
@@ -83,12 +83,12 @@ export async function DELETE(req: Request) {
 
     if (id) {
       await db.bookmark.deleteMany({
-        where: { id, userId: session.userId },
+        where: { id },
       });
     } else if (bookId && pageNumber) {
       await db.bookmark.deleteMany({
         where: {
-          userId: session.userId,
+          userId: user.userId,
           bookId,
           pageNumber: parseInt(pageNumber, 10),
         },

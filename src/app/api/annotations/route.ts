@@ -1,19 +1,19 @@
 import { NextResponse } from 'next/server';
-import { getAuthUser } from '@/lib/auth';
+import { getEffectiveUser } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { annotationSchema } from '@/lib/validation';
 
 export async function GET(req: Request) {
   try {
-    const session = await getAuthUser();
-    if (!session) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    const user = await getEffectiveUser();
+    if (!user) {
+      return NextResponse.json({ annotations: [] });
     }
 
     const { searchParams } = new URL(req.url);
     const bookId = searchParams.get('bookId');
 
-    const where: any = { userId: session.userId };
+    const where: any = { userId: user.userId };
     if (bookId) where.bookId = bookId;
 
     const annotations = await db.annotation.findMany({
@@ -35,8 +35,8 @@ export async function GET(req: Request) {
 
 export async function POST(req: Request) {
   try {
-    const session = await getAuthUser();
-    if (!session) {
+    const user = await getEffectiveUser();
+    if (!user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
@@ -44,7 +44,7 @@ export async function POST(req: Request) {
     const validated = annotationSchema.parse(body);
 
     const book = await db.book.findFirst({
-      where: { id: validated.bookId, userId: session.userId },
+      where: { id: validated.bookId },
     });
 
     if (!book) {
@@ -53,7 +53,7 @@ export async function POST(req: Request) {
 
     const annotation = await db.annotation.create({
       data: {
-        userId: session.userId,
+        userId: user.userId,
         bookId: validated.bookId,
         pageNumber: validated.pageNumber,
         selectedText: validated.selectedText || 'Page Note',
@@ -70,7 +70,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ annotation });
   } catch (error: any) {
     if (error.name === 'ZodError') {
-      return NextResponse.json({ error: error.errors[0].message }, { status: 400 });
+      return NextResponse.json({ error: error.errors[0]?.message || 'Invalid input' }, { status: 400 });
     }
     console.error('Create annotation error:', error);
     return NextResponse.json({ error: 'Failed to create annotation' }, { status: 500 });
@@ -79,8 +79,8 @@ export async function POST(req: Request) {
 
 export async function DELETE(req: Request) {
   try {
-    const session = await getAuthUser();
-    if (!session) {
+    const user = await getEffectiveUser();
+    if (!user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
@@ -92,7 +92,7 @@ export async function DELETE(req: Request) {
     }
 
     const annotation = await db.annotation.findFirst({
-      where: { id, userId: session.userId },
+      where: { id },
     });
 
     if (!annotation) {
