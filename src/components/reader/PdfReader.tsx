@@ -1968,26 +1968,30 @@ export function PdfReader({ book }: PdfReaderProps) {
               </button>
             </div>
 
-            <div className="space-y-2 text-xs">
-              <div className="flex justify-between py-1 border-b border-stone-100 dark:border-stone-800">
-                <span className="font-semibold">Next Page</span>
-                <kbd className="px-2 py-0.5 rounded bg-stone-200 dark:bg-stone-800 font-mono">→</kbd> or <kbd className="px-2 py-0.5 rounded bg-stone-200 dark:bg-stone-800 font-mono">Space</kbd>
+            <div className="space-y-2 text-xs text-[var(--text-main)]">
+              <div className="flex items-center justify-between py-1.5 border-b border-[var(--border-main)]">
+                <span className="font-semibold text-[var(--text-main)]">Next Page</span>
+                <div className="flex items-center gap-1">
+                  <kbd className="px-2 py-0.5 rounded-md bg-stone-100 dark:bg-stone-800 text-stone-900 dark:text-stone-100 font-mono text-[11px] font-bold border border-stone-300 dark:border-stone-700 shadow-xs">→</kbd>
+                  <span className="text-[var(--text-muted)] text-[11px]">or</span>
+                  <kbd className="px-2.5 py-0.5 rounded-md bg-stone-100 dark:bg-stone-800 text-stone-900 dark:text-stone-100 font-mono text-[11px] font-bold border border-stone-300 dark:border-stone-700 shadow-xs">Space</kbd>
+                </div>
               </div>
-              <div className="flex justify-between py-1 border-b border-stone-100 dark:border-stone-800">
-                <span className="font-semibold">Previous Page</span>
-                <kbd className="px-2 py-0.5 rounded bg-stone-200 dark:bg-stone-800 font-mono">←</kbd>
+              <div className="flex items-center justify-between py-1.5 border-b border-[var(--border-main)]">
+                <span className="font-semibold text-[var(--text-main)]">Previous Page</span>
+                <kbd className="px-2 py-0.5 rounded-md bg-stone-100 dark:bg-stone-800 text-stone-900 dark:text-stone-100 font-mono text-[11px] font-bold border border-stone-300 dark:border-stone-700 shadow-xs">←</kbd>
               </div>
-              <div className="flex justify-between py-1 border-b border-stone-100 dark:border-stone-800">
-                <span className="font-semibold">Bookmark Page</span>
-                <kbd className="px-2 py-0.5 rounded bg-stone-200 dark:bg-stone-800 font-mono">B</kbd>
+              <div className="flex items-center justify-between py-1.5 border-b border-[var(--border-main)]">
+                <span className="font-semibold text-[var(--text-main)]">Bookmark Page</span>
+                <kbd className="px-2 py-0.5 rounded-md bg-stone-100 dark:bg-stone-800 text-stone-900 dark:text-stone-100 font-mono text-[11px] font-bold border border-stone-300 dark:border-stone-700 shadow-xs">B</kbd>
               </div>
-              <div className="flex justify-between py-1 border-b border-stone-100 dark:border-stone-800">
-                <span className="font-semibold">Toggle Sidebar</span>
-                <kbd className="px-2 py-0.5 rounded bg-stone-200 dark:bg-stone-800 font-mono">S</kbd>
+              <div className="flex items-center justify-between py-1.5 border-b border-[var(--border-main)]">
+                <span className="font-semibold text-[var(--text-main)]">Toggle Sidebar</span>
+                <kbd className="px-2 py-0.5 rounded-md bg-stone-100 dark:bg-stone-800 text-stone-900 dark:text-stone-100 font-mono text-[11px] font-bold border border-stone-300 dark:border-stone-700 shadow-xs">S</kbd>
               </div>
-              <div className="flex justify-between py-1">
-                <span className="font-semibold">Close Overlay / Popover</span>
-                <kbd className="px-2 py-0.5 rounded bg-stone-200 dark:bg-stone-800 font-mono">Esc</kbd>
+              <div className="flex items-center justify-between py-1.5">
+                <span className="font-semibold text-[var(--text-main)]">Close Overlay / Popover</span>
+                <kbd className="px-2 py-0.5 rounded-md bg-stone-100 dark:bg-stone-800 text-stone-900 dark:text-stone-100 font-mono text-[11px] font-bold border border-stone-300 dark:border-stone-700 shadow-xs">Esc</kbd>
               </div>
             </div>
           </div>
