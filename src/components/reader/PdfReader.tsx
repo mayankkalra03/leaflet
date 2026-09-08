@@ -51,6 +51,7 @@ interface StickerItem {
   id: string;
   pageNumber: number;
   emoji: string;
+  note?: string | null;
   xPercent: number;
   yPercent: number;
   scale: number;
@@ -83,6 +84,16 @@ interface PdfReaderProps {
 }
 
 const EMOJI_STICKERS = ['⭐', '❤️', '💡', '🔥', '❗', '🤔', '😂', '📌'];
+const STICKER_LABELS: Record<string, string> = {
+  '⭐': 'Favorite',
+  '❤️': 'Loved',
+  '💡': 'Insight',
+  '🔥': 'Key Passage',
+  '❗': 'Important',
+  '🤔': 'Question',
+  '😂': 'Humor',
+  '📌': 'Pinned',
+};
 const HIGHLIGHT_COLORS = [
   { name: 'Yellow', value: '#fef08a', class: 'bg-yellow-300' },
   { name: 'Green', value: '#bbf7d0', class: 'bg-green-300' },
@@ -110,6 +121,11 @@ export function PdfReader({ book }: PdfReaderProps) {
   const [stickers, setStickers] = useState<StickerItem[]>([]);
   const [toc, setToc] = useState<TocItem[]>([]);
 
+  // Sticker Note State
+  const [stickerNoteInput, setStickerNoteInput] = useState('');
+  const [editingStickerId, setEditingStickerId] = useState<string | null>(null);
+  const [editingStickerNote, setEditingStickerNote] = useState('');
+
   // Search State
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
@@ -127,6 +143,14 @@ export function PdfReader({ book }: PdfReaderProps) {
   const [showAddPageNote, setShowAddPageNote] = useState(false);
   const [pageNoteText, setPageNoteText] = useState('');
   const [pageNoteColor, setPageNoteColor] = useState('#fef08a');
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+
+  const showToast = (message: string, type: 'success' | 'error' = 'success') => {
+    setToast({ message, type });
+    setTimeout(() => {
+      setToast((prev) => (prev?.message === message ? null : prev));
+    }, 2800);
+  };
 
   // Canvas & Layer Refs
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -139,9 +163,14 @@ export function PdfReader({ book }: PdfReaderProps) {
   const [hasTextContent, setHasTextContent] = useState(true);
   const [textLayerReadyKey, setTextLayerReadyKey] = useState(0);
 
-  // Load PDF Document
+  const [isDocLoading, setIsDocLoading] = useState(true);
+  const [isPageRendering, setIsPageRendering] = useState(false);
+  const [isDetectingToc, setIsDetectingToc] = useState(false);
+
+  // Load PDF Document & Extract Outline
   useEffect(() => {
     let isMounted = true;
+    setIsDocLoading(true);
     const loadingTask = pdfjsLib.getDocument(book.fileUrl);
 
     loadingTask.promise.then(
@@ -149,47 +178,222 @@ export function PdfReader({ book }: PdfReaderProps) {
         if (!isMounted) return;
         setPdfDoc(doc);
         setNumPages(doc.numPages);
+        setIsDocLoading(false);
 
-        // Extract TOC Outline
+        // Extract TOC Outline (3-tier smart extraction)
         try {
-          const outline = await doc.getOutline();
-          if (outline && outline.length > 0) {
-            const extractItems = async (items: any[]): Promise<TocItem[]> => {
-              const result: TocItem[] = [];
-              for (const item of items) {
-                let pageNumber = 1;
-                if (item.dest) {
-                  try {
-                    const destRef = typeof item.dest === 'string' ? await doc.getDestination(item.dest) : item.dest;
-                    if (Array.isArray(destRef) && destRef[0]) {
-                      const destIndex = await doc.getPageIndex(destRef[0]);
-                      pageNumber = destIndex + 1;
+          setIsDetectingToc(true);
+          let parsedToc: TocItem[] = [];
+
+          // Strategy 1: Check embedded PDF metadata outline
+          try {
+            const outline = await doc.getOutline();
+            if (outline && outline.length > 0) {
+              const extractItems = async (items: any[]): Promise<TocItem[]> => {
+                const result: TocItem[] = [];
+                for (const item of items) {
+                  let pageNumber = 1;
+                  if (item.dest) {
+                    try {
+                      const destRef = typeof item.dest === 'string' ? await doc.getDestination(item.dest) : item.dest;
+                      if (Array.isArray(destRef) && destRef[0]) {
+                        const destIndex = await doc.getPageIndex(destRef[0]);
+                        pageNumber = destIndex + 1;
+                      }
+                    } catch {
+                      // Fallback
                     }
-                  } catch {
-                    // Fallback
+                  }
+                  if (item.title) {
+                    result.push({ title: item.title.trim(), pageNumber });
+                  }
+                  if (item.items && item.items.length > 0) {
+                    const children = await extractItems(item.items);
+                    result.push(...children);
                   }
                 }
-                if (item.title) {
-                  result.push({ title: item.title, pageNumber });
-                }
-                if (item.items && item.items.length > 0) {
-                  const children = await extractItems(item.items);
-                  result.push(...children);
-                }
-              }
-              return result;
-            };
+                return result;
+              };
 
-            const parsedToc = await extractItems(outline);
-            // Sort chronologically by page number so TOC matches actual reading order
+              parsedToc = await extractItems(outline);
+            }
+          } catch (e) {
+            console.warn('PDF embedded outline error:', e);
+          }
+
+          // Strategy 2: Scan early pages for a printed "Contents" page with link annotations
+          if (parsedToc.length === 0) {
+            const maxContentsPages = Math.min(doc.numPages, 25);
+            for (let pNum = 1; pNum <= maxContentsPages; pNum++) {
+              try {
+                const page = await doc.getPage(pNum);
+                const textContent = await page.getTextContent();
+                const pageRawText = textContent.items.map((it: any) => it.str).join(' ');
+
+                if (/contents|table of contents/i.test(pageRawText)) {
+                  const annotations = await page.getAnnotations();
+                  const linkAnns = annotations.filter((a: any) => a.subtype === 'Link' && (a.dest || typeof a.dest === 'string'));
+
+                  if (linkAnns.length > 0) {
+                    for (const link of linkAnns) {
+                      let targetPage = 1;
+                      try {
+                        const destRef = typeof link.dest === 'string' ? await doc.getDestination(link.dest) : link.dest;
+                        if (Array.isArray(destRef) && destRef[0]) {
+                          const destIndex = await doc.getPageIndex(destRef[0]);
+                          targetPage = destIndex + 1;
+                        }
+                      } catch {
+                        continue;
+                      }
+
+                      // Match overlapping text in annotation rect (strictly line-by-line)
+                      let label = '';
+                      if (link.rect && textContent.items) {
+                        const [lx1, ly1, lx2, ly2] = link.rect;
+                        const minX = Math.min(lx1, lx2);
+                        const maxX = Math.max(lx1, lx2);
+                        const minY = Math.min(ly1, ly2);
+                        const maxY = Math.max(ly1, ly2);
+                        const centerY = (minY + maxY) / 2;
+
+                        const rawItems = textContent.items as any[];
+                        const matchingItems = rawItems.filter((item: any) => {
+                          if (!item.transform) return false;
+                          const itemX = item.transform[4];
+                          const itemY = item.transform[5];
+                          // Match items strictly overlapping the annotation box
+                          return itemX >= minX - 4 && itemX <= maxX + 4 && itemY >= minY - 2 && itemY <= maxY + 4;
+                        });
+
+                        // Group overlapping items by Y baseline to isolate distinct lines
+                        const lineGroups = new Map<number, any[]>();
+                        for (const it of matchingItems) {
+                          const y = Math.round(it.transform[5]);
+                          let foundKey: number | null = null;
+                          for (const k of lineGroups.keys()) {
+                            if (Math.abs(k - y) <= 4) {
+                              foundKey = k;
+                              break;
+                            }
+                          }
+                          const key = foundKey !== null ? foundKey : y;
+                          if (!lineGroups.has(key)) lineGroups.set(key, []);
+                          lineGroups.get(key)!.push(it);
+                        }
+
+                        // Pick the single line closest to annotation vertical center
+                        let bestLineItems: any[] = [];
+                        let minDistance = Infinity;
+                        for (const [yKey, items] of lineGroups.entries()) {
+                          const dist = Math.abs(yKey - centerY);
+                          if (dist < minDistance) {
+                            minDistance = dist;
+                            bestLineItems = items;
+                          }
+                        }
+
+                        bestLineItems.sort((a, b) => (a as any).transform[4] - (b as any).transform[4]);
+                        label = bestLineItems.map((it: any) => it.str).join(' ').trim();
+                      }
+
+                      if (!label) {
+                        label = typeof link.dest === 'string' ? link.dest.replace(/[-_]/g, ' ') : `Page ${targetPage}`;
+                      }
+
+                      // Clean and format TOC title (remove duplicate chapter prefixes and trailing punctuation)
+                      let cleanedLabel = label.replace(/\s+/g, ' ').trim();
+
+                      // If multiple "Chapter X" mentions were joined in one string, extract the last/primary one
+                      const chapterMatches = cleanedLabel.match(/chapter\s+[\w\d]+/gi);
+                      if (chapterMatches && chapterMatches.length > 1) {
+                        cleanedLabel = chapterMatches[chapterMatches.length - 1];
+                      }
+
+                      // Strip trailing dots, colons, dashes (e.g. "Chapter 1." -> "Chapter 1")
+                      cleanedLabel = cleanedLabel.replace(/[.:\-_]+$/, '').trim();
+
+                      // Standardize formatting
+                      if (/^chapter\s+\d+$/i.test(cleanedLabel)) {
+                        const num = cleanedLabel.replace(/chapter\s+/i, '');
+                        cleanedLabel = `Chapter ${num}`;
+                      } else if (/^part\s+/i.test(cleanedLabel)) {
+                        cleanedLabel = cleanedLabel.toUpperCase();
+                      }
+
+                      if (cleanedLabel && !parsedToc.some((it) => it.title === cleanedLabel && it.pageNumber === targetPage)) {
+                        parsedToc.push({ title: cleanedLabel, pageNumber: targetPage });
+                      }
+                    }
+                  }
+                }
+              } catch {
+                // continue to next page
+              }
+            }
+          }
+
+          // Strategy 3: Scan page headers across the book for chapter headings
+          if (parsedToc.length === 0) {
+            const maxPagesToScan = Math.min(doc.numPages, 120);
+            const chapterHeadingRegex = /^(?:(?:part|volume|book|section)\s+(?:[0-9]+|[ivxlcdm]+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)|(?:chapter\s+(?:[0-9]+|[ivxlcdm]+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|twenty-one|twenty-two|twenty-three|twenty-four|twenty-five|twenty-six|twenty-seven|twenty-eight|twenty-nine|thirty))|prologue|epilogue|introduction|preface|afterword|appendix|conclusion)\b/i;
+
+            for (let pNum = 1; pNum <= maxPagesToScan; pNum++) {
+              try {
+                const page = await doc.getPage(pNum);
+                const textContent = await page.getTextContent();
+                const lines: string[] = [];
+                let currentLine = '';
+                let lastY: number | null = null;
+
+                for (const item of textContent.items as any[]) {
+                  const text = item.str?.trim();
+                  if (!text) continue;
+                  const y = item.transform ? Math.round(item.transform[5]) : 0;
+                  if (lastY !== null && Math.abs(y - lastY) > 8) {
+                    if (currentLine) lines.push(currentLine);
+                    currentLine = text;
+                  } else {
+                    currentLine = currentLine ? `${currentLine} ${text}` : text;
+                  }
+                  lastY = y;
+                }
+                if (currentLine) lines.push(currentLine);
+
+                for (const line of lines.slice(0, 5)) {
+                  let trimmed = line.trim();
+                  if (chapterHeadingRegex.test(trimmed) && trimmed.length < 55) {
+                    trimmed = trimmed.replace(/[.:\-_]+$/, '').trim();
+                    const formatted = trimmed.charAt(0).toUpperCase() + trimmed.slice(1);
+                    if (!parsedToc.some((it) => it.title.toLowerCase() === formatted.toLowerCase())) {
+                      parsedToc.push({ title: formatted, pageNumber: pNum });
+                    }
+                    break;
+                  }
+                }
+              } catch {
+                // ignore
+              }
+            }
+          }
+
+          if (isMounted && parsedToc.length > 0) {
             parsedToc.sort((a, b) => a.pageNumber - b.pageNumber);
             setToc(parsedToc);
           }
         } catch (e) {
           console.warn('Could not extract TOC outline:', e);
+        } finally {
+          if (isMounted) setIsDetectingToc(false);
         }
       },
-      (err) => console.error('PDF load error:', err)
+      (err) => {
+        console.error('PDF load error:', err);
+        if (isMounted) {
+          setIsDocLoading(false);
+          setIsDetectingToc(false);
+        }
+      }
     );
 
     return () => {
@@ -269,6 +473,8 @@ export function PdfReader({ book }: PdfReaderProps) {
         }
         currentTextLayerTaskRef.current = null;
       }
+
+      setIsPageRendering(true);
 
       try {
         const page = await pdfDoc.getPage(pageNumber);
@@ -391,6 +597,8 @@ export function PdfReader({ book }: PdfReaderProps) {
         if (err?.name !== 'RenderingCancelledException') {
           console.error('Render page error:', err);
         }
+      } finally {
+        setIsPageRendering(false);
       }
     },
     [pdfDoc, scale]
@@ -439,9 +647,23 @@ export function PdfReader({ book }: PdfReaderProps) {
     const escapeRegExp = (str: string) => str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const normalizeForSearch = (str: string) =>
       str
-        .replace(/[\u2018\u2019]/g, "'")
-        .replace(/[\u201C\u201D]/g, '"')
-        .replace(/\u00A0/g, ' ');
+        // Typography ligatures expansion
+        .replace(/\uFB00/g, 'ff')
+        .replace(/\uFB01/g, 'fi')
+        .replace(/\uFB02/g, 'fl')
+        .replace(/\uFB03/g, 'ffi')
+        .replace(/\uFB04/g, 'ffl')
+        .replace(/\uFB05/g, 'ft')
+        .replace(/\uFB06/g, 'st')
+        // Quotes and apostrophes
+        .replace(/[\u2018\u2019\u201A\u201B\u2032\u0060\u00B4]/g, "'")
+        .replace(/[\u201C\u201D\u201E\u201F\u2033]/g, '"')
+        // Dashes & hyphens
+        .replace(/[\u2013\u2014\u2015\u2212]/g, '-')
+        // Soft hyphen and invisible characters
+        .replace(/[\u00AD\u200B\u200C\u200D\uFEFF]/g, '')
+        // Non-breaking & special spaces
+        .replace(/[\u00A0\u2000-\u200A\u202F\u205F\u3000]/g, ' ');
 
     // Build contiguous representation of page text across all spans
     let combinedText = '';
@@ -474,41 +696,85 @@ export function PdfReader({ book }: PdfReaderProps) {
       if (!target || target.toLowerCase() === 'page note' || target.startsWith('Note on Page')) return;
 
       const normTarget = normalizeForSearch(target);
-      const tokens = normTarget.split(/\s+/).filter(Boolean);
-      if (tokens.length === 0) return;
+      const rawTokens = normTarget.split(/\s+/).filter(Boolean);
+      if (rawTokens.length === 0) return;
 
-      const isSingleWord = tokens.length === 1 && /^[\w'-]+$/u.test(tokens[0]);
+      // Clean punctuation from start/end of tokens for more resilient matching
+      const cleanTokens = rawTokens.map((t) => t.replace(/^[^\w\d]+|[^\w\d]+$/g, '')).filter(Boolean);
+      const tokensToUse = cleanTokens.length > 0 ? cleanTokens : rawTokens;
+
+      // Allow letters within each word to have optional whitespace (handles drop-caps & kerning breaks like "M" + "ariam")
+      const buildTokenPattern = (tok: string) => {
+        const letters = Array.from(tok);
+        return letters.map((ch) => escapeRegExp(ch)).join('\\s*');
+      };
+
+      const isSingleWord = tokensToUse.length === 1 && /^[\w'-]+$/u.test(tokensToUse[0]);
       const pattern = isSingleWord
-        ? `\\b(${escapeRegExp(tokens[0])})\\b`
-        : tokens.map((t) => escapeRegExp(t)).join('\\s+');
+        ? `\\b(${buildTokenPattern(tokensToUse[0])})\\b`
+        : tokensToUse.map((t) => buildTokenPattern(t)).join('[\\s\\W]+');
 
-      let regex: RegExp;
+      let regex: RegExp | null = null;
       try {
         regex = new RegExp(pattern, 'gi');
       } catch {
-        return;
+        try {
+          regex = new RegExp(tokensToUse.map((t) => escapeRegExp(t)).join('[\\s\\W]+'), 'gi');
+        } catch {
+          regex = null;
+        }
       }
 
-      let match: RegExpExecArray | null = null;
-      let chosenMatch: RegExpExecArray | null = null;
+      let chosenMatch: { index: number; length: number } | null = null;
 
-      while ((match = regex.exec(normCombined)) !== null) {
-        const start = match.index;
-        const end = start + match[0].length;
-        const alreadyUsed = usedRanges.some((r) => Math.max(r.start, start) < Math.min(r.end, end));
-        if (!alreadyUsed) {
-          chosenMatch = match;
-          break;
+      if (regex) {
+        let match: RegExpExecArray | null = null;
+        while ((match = regex.exec(normCombined)) !== null) {
+          const start = match.index;
+          const end = start + match[0].length;
+          const alreadyUsed = usedRanges.some((r) => Math.max(r.start, start) < Math.min(r.end, end));
+          if (!alreadyUsed) {
+            chosenMatch = { index: start, length: match[0].length };
+            break;
+          }
+          if (!chosenMatch) {
+            chosenMatch = { index: start, length: match[0].length };
+          }
         }
-        if (!chosenMatch) {
-          chosenMatch = match;
+      }
+
+      // Resilient fallback: sliding window search across words if regex didn't find a match
+      if (!chosenMatch && tokensToUse.length > 0) {
+        const firstTok = tokensToUse[0].toLowerCase();
+        const lastTok = tokensToUse[tokensToUse.length - 1].toLowerCase();
+        const lowerCombined = normCombined.toLowerCase();
+
+        let searchIdx = 0;
+        while (searchIdx < lowerCombined.length) {
+          const foundFirst = lowerCombined.indexOf(firstTok, searchIdx);
+          if (foundFirst === -1) break;
+
+          let candidateEnd = foundFirst + firstTok.length;
+          if (tokensToUse.length > 1) {
+            const foundLast = lowerCombined.indexOf(lastTok, candidateEnd);
+            if (foundLast !== -1 && foundLast - foundFirst < normTarget.length * 2.5) {
+              candidateEnd = foundLast + lastTok.length;
+            }
+          }
+
+          const alreadyUsed = usedRanges.some((r) => Math.max(r.start, foundFirst) < Math.min(r.end, candidateEnd));
+          if (!alreadyUsed) {
+            chosenMatch = { index: foundFirst, length: candidateEnd - foundFirst };
+            break;
+          }
+          searchIdx = foundFirst + 1;
         }
       }
 
       if (!chosenMatch) return;
 
       const matchStart = chosenMatch.index;
-      const matchEnd = matchStart + chosenMatch[0].length;
+      const matchEnd = matchStart + chosenMatch.length;
       usedRanges.push({ start: matchStart, end: matchEnd });
 
       let currentSpan = -1;
@@ -645,14 +911,19 @@ export function PdfReader({ book }: PdfReaderProps) {
       });
 
       if (res.ok) {
+        showToast(noteInput.trim() ? 'Note saved' : 'Highlight saved', 'success');
         fetchReaderData();
         setSelection(null);
         setNoteInput('');
         setShowNoteField(false);
         window.getSelection()?.removeAllRanges();
+      } else {
+        const errData = await res.json().catch(() => ({}));
+        showToast(errData.error || 'Failed to save note', 'error');
       }
     } catch (err) {
-      console.error(err);
+      console.error('Failed to save highlight/note:', err);
+      showToast('Network error saving note', 'error');
     }
   };
 
@@ -676,12 +947,17 @@ export function PdfReader({ book }: PdfReaderProps) {
       });
 
       if (res.ok) {
+        showToast('Page note saved', 'success');
         setPageNoteText('');
         setShowAddPageNote(false);
         fetchReaderData();
+      } else {
+        const errData = await res.json().catch(() => ({}));
+        showToast(errData.error || 'Failed to save note', 'error');
       }
     } catch (err) {
       console.error('Failed to add page note:', err);
+      showToast('Network error saving page note', 'error');
     }
   };
 
@@ -745,6 +1021,7 @@ export function PdfReader({ book }: PdfReaderProps) {
         await fetch(`/api/bookmarks?bookId=${book.id}&pageNumber=${currentPage}`, {
           method: 'DELETE',
         });
+        showToast('Bookmark removed', 'success');
       } else {
         await fetch('/api/bookmarks', {
           method: 'POST',
@@ -755,10 +1032,12 @@ export function PdfReader({ book }: PdfReaderProps) {
             title: `Bookmark Page ${currentPage}`,
           }),
         });
+        showToast('Bookmark added', 'success');
       }
       fetchReaderData();
     } catch (err) {
       console.error(err);
+      showToast('Failed to update bookmark', 'error');
     }
   };
 
@@ -772,22 +1051,53 @@ export function PdfReader({ book }: PdfReaderProps) {
           bookId: book.id,
           pageNumber: currentPage,
           emoji,
+          note: stickerNoteInput.trim() || undefined,
           xPercent: 50,
           yPercent: 30,
         }),
       });
 
       if (res.ok) {
+        showToast('Sticker placed', 'success');
+        setStickerNoteInput('');
         fetchReaderData();
+      } else {
+        const errData = await res.json().catch(() => ({}));
+        showToast(errData.error || 'Failed to add sticker', 'error');
       }
     } catch (err) {
       console.error(err);
+      showToast('Network error adding sticker', 'error');
+    }
+  };
+
+  // Update Note on Existing Sticker
+  const handleUpdateStickerNote = async (id: string, note: string) => {
+    try {
+      const res = await fetch('/api/stickers', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, note: note.trim() || null }),
+      });
+      if (res.ok) {
+        showToast('Sticker note updated', 'success');
+        setEditingStickerId(null);
+        setEditingStickerNote('');
+        fetchReaderData();
+      } else {
+        const errData = await res.json().catch(() => ({}));
+        showToast(errData.error || 'Failed to update sticker note', 'error');
+      }
+    } catch (err) {
+      console.error(err);
+      showToast('Network error updating sticker note', 'error');
     }
   };
 
   const handleDeleteSticker = async (id: string) => {
     try {
       await fetch(`/api/stickers?id=${id}`, { method: 'DELETE' });
+      showToast('Sticker removed', 'success');
       fetchReaderData();
     } catch (err) {
       console.error(err);
@@ -797,6 +1107,7 @@ export function PdfReader({ book }: PdfReaderProps) {
   const handleDeleteAnnotation = async (id: string) => {
     try {
       await fetch(`/api/annotations?id=${id}`, { method: 'DELETE' });
+      showToast('Annotation removed', 'success');
       fetchReaderData();
     } catch (err) {
       console.error(err);
@@ -924,7 +1235,7 @@ export function PdfReader({ book }: PdfReaderProps) {
                   const val = Number(e.target.value);
                   if (val >= 1 && val <= numPages) setCurrentPage(val);
                 }}
-                className="w-11 text-center bg-black/10 dark:bg-white/15 text-[var(--reader-text)] font-bold text-xs rounded border border-[var(--reader-border)] px-1 py-0.5 focus:outline-none focus:ring-1 focus:ring-[var(--accent-main)]"
+                className="w-10 text-center bg-black/10 dark:bg-white/15 text-[var(--reader-text)] font-bold text-xs rounded border border-[var(--reader-border)] px-1 py-0.5 focus:outline-none focus:ring-1 focus:ring-[var(--accent-main)] [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
               />
               <span className="text-[var(--reader-text)] opacity-90">/ {numPages}</span>
             </div>
@@ -1081,7 +1392,7 @@ export function PdfReader({ book }: PdfReaderProps) {
                     : 'border-transparent text-[var(--reader-muted)] hover:text-[var(--reader-text)]'
                 }`}
               >
-                Notes ({annotations.length})
+                Notes ({annotations.length + bookmarks.length})
               </button>
               <button
                 onClick={() => setActiveTab('stickers')}
@@ -1111,7 +1422,17 @@ export function PdfReader({ book }: PdfReaderProps) {
               {activeTab === 'toc' && (
                 <div className="space-y-2">
                   <h3 className="text-xs font-extrabold uppercase tracking-wider text-[var(--reader-muted)]">Table of Contents</h3>
-                  {toc.length === 0 ? (
+                  {isDetectingToc ? (
+                    <div className="space-y-2 pt-1 animate-fadeIn">
+                      <div className="flex items-center gap-2 text-xs text-[var(--reader-muted)] pb-1">
+                        <div className="w-3.5 h-3.5 border-2 border-[var(--accent-main)] border-t-transparent rounded-full animate-spin shrink-0" />
+                        <span>Detecting chapters and outline...</span>
+                      </div>
+                      {[...Array(5)].map((_, i) => (
+                        <div key={i} className="h-9 rounded-xl bg-black/5 dark:bg-white/10 animate-pulse" />
+                      ))}
+                    </div>
+                  ) : toc.length === 0 ? (
                     <p className="text-xs text-[var(--reader-muted)] italic">No document outline available.</p>
                   ) : (
                     <div className="space-y-1">
@@ -1134,11 +1455,82 @@ export function PdfReader({ book }: PdfReaderProps) {
                 </div>
               )}
 
-              {/* ANNOTATIONS TAB */}
+              {/* ANNOTATIONS & BOOKMARKS TAB */}
               {activeTab === 'annotations' && (
-                <div className="space-y-3">
+                <div className="space-y-4">
+                  {/* Bookmarks Section */}
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <h3 className="text-xs font-extrabold uppercase tracking-wider text-[var(--reader-muted)] flex items-center gap-1.5">
+                        <Bookmark className="w-3.5 h-3.5 text-amber-500 fill-amber-500" />
+                        <span>Bookmarks ({bookmarks.length})</span>
+                      </h3>
+                      <button
+                        onClick={handleToggleBookmark}
+                        className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all flex items-center gap-1 shadow-xs ${
+                          isPageBookmarked
+                            ? 'bg-amber-500 text-white hover:bg-amber-600'
+                            : 'bg-black/5 dark:bg-white/10 text-[var(--reader-text)] hover:bg-[var(--accent-light)] hover:text-[var(--accent-main)] border border-[var(--reader-border)]'
+                        }`}
+                        title={isPageBookmarked ? 'Remove bookmark from this page' : 'Bookmark current page'}
+                      >
+                        <Bookmark className={`w-3.5 h-3.5 ${isPageBookmarked ? 'fill-white' : ''}`} />
+                        <span>{isPageBookmarked ? 'Bookmarked' : '+ Bookmark'}</span>
+                      </button>
+                    </div>
+
+                    {bookmarks.length === 0 ? (
+                      <p className="text-xs text-[var(--reader-muted)] italic">
+                        No pages bookmarked yet. Click the bookmark icon in toolbar or press <kbd className="px-1 py-0.5 rounded bg-black/5 dark:bg-white/10 font-mono text-[10px]">B</kbd>.
+                      </p>
+                    ) : (
+                      <div className="flex flex-wrap gap-2 pt-1">
+                        {bookmarks.map((bm) => (
+                          <div
+                            key={bm.id}
+                            onClick={() => setCurrentPage(bm.pageNumber)}
+                            className={`group flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs font-semibold cursor-pointer transition-all shadow-xs ${
+                              currentPage === bm.pageNumber
+                                ? 'bg-amber-500 text-white border-amber-600 shadow-amber-500/20'
+                                : 'bg-[var(--reader-surface)] text-[var(--reader-text)] border-[var(--reader-border)] hover:border-amber-500 hover:text-amber-500'
+                            }`}
+                          >
+                            <span className="flex items-center gap-1">
+                              <Bookmark className={`w-3 h-3 ${currentPage === bm.pageNumber ? 'fill-white' : 'fill-amber-500 text-amber-500'}`} />
+                              <span>Page {bm.pageNumber}</span>
+                            </span>
+                            <button
+                              type="button"
+                              onClick={async (e) => {
+                                e.stopPropagation();
+                                try {
+                                  await fetch(`/api/bookmarks?bookId=${book.id}&pageNumber=${bm.pageNumber}`, {
+                                    method: 'DELETE',
+                                  });
+                                  showToast(`Bookmark on Page ${bm.pageNumber} removed`, 'success');
+                                  fetchReaderData();
+                                } catch (err) {
+                                  console.error(err);
+                                }
+                              }}
+                              className={`p-0.5 rounded-full hover:bg-black/20 transition-colors opacity-70 group-hover:opacity-100 ${
+                                currentPage === bm.pageNumber ? 'text-white' : 'text-[var(--reader-muted)] hover:text-red-500'
+                              }`}
+                              title="Delete bookmark"
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  <hr className="border-[var(--reader-border)]" />
+
+                  {/* Highlights & Notes Section */}
                   <div className="flex items-center justify-between">
-                    <h3 className="text-xs font-extrabold uppercase tracking-wider text-[var(--reader-muted)]">Highlights & Notes</h3>
+                    <h3 className="text-xs font-extrabold uppercase tracking-wider text-[var(--reader-muted)]">Highlights & Notes ({annotations.length})</h3>
                     <button
                       onClick={() => setShowAddPageNote(!showAddPageNote)}
                       className="px-2.5 py-1 rounded-lg bg-[var(--accent-main)] text-[var(--bg-main)] text-xs font-bold hover:opacity-90 transition-opacity flex items-center gap-1 shadow-xs"
@@ -1240,31 +1632,116 @@ export function PdfReader({ book }: PdfReaderProps) {
               {/* STICKERS TAB */}
               {activeTab === 'stickers' && (
                 <div className="space-y-4 text-[var(--reader-text)]">
-                  <div>
-                    <h3 className="text-xs font-extrabold uppercase tracking-wider text-[var(--reader-muted)] mb-2">Place Sticker on Page {currentPage}</h3>
+                  <div className="space-y-2">
+                    <h3 className="text-xs font-extrabold uppercase tracking-wider text-[var(--reader-muted)]">
+                      Place Sticker on Page {currentPage}
+                    </h3>
                     <div className="grid grid-cols-4 gap-2">
                       {EMOJI_STICKERS.map((emoji) => (
                         <button
                           key={emoji}
                           onClick={() => handleAddSticker(emoji)}
-                          className="h-11 text-2xl bg-black/5 dark:bg-white/10 hover:bg-[var(--accent-light)] border border-[var(--reader-border)] rounded-xl flex items-center justify-center transition-all hover:scale-110 shadow-xs"
+                          className="h-10 text-xl bg-black/5 dark:bg-white/10 hover:bg-[var(--accent-light)] border border-[var(--reader-border)] rounded-xl flex items-center justify-center transition-all hover:scale-110 shadow-xs"
+                          title={`Place ${STICKER_LABELS[emoji] || 'Sticker'} on page`}
                         >
                           {emoji}
                         </button>
                       ))}
                     </div>
+
+                    {/* Optional Note Field when placing sticker */}
+                    <div className="pt-1">
+                      <input
+                        type="text"
+                        value={stickerNoteInput}
+                        onChange={(e) => setStickerNoteInput(e.target.value)}
+                        placeholder="Attach note with next sticker (optional)..."
+                        className="w-full px-3 py-2 rounded-xl border border-[var(--reader-border)] bg-black/5 dark:bg-white/10 text-xs text-[var(--reader-text)] placeholder:text-[var(--reader-muted)] focus:outline-none focus:ring-1 focus:ring-[var(--accent-main)]"
+                      />
+                    </div>
                   </div>
 
                   <div className="pt-2 space-y-2">
-                    <h4 className="text-xs font-extrabold uppercase tracking-wider text-[var(--reader-muted)]">Page Stickers ({currentStickers.length})</h4>
-                    {currentStickers.map((st) => (
-                      <div key={st.id} className="flex items-center justify-between p-2.5 rounded-xl bg-[var(--reader-surface)] border border-[var(--reader-border)] text-xs font-semibold">
-                        <span className="text-xl">{st.emoji} Sticker</span>
-                        <button onClick={() => handleDeleteSticker(st.id)} className="text-[var(--reader-muted)] hover:text-red-500">
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    ))}
+                    <h4 className="text-xs font-extrabold uppercase tracking-wider text-[var(--reader-muted)]">
+                      Page Stickers ({currentStickers.length})
+                    </h4>
+                    {currentStickers.length === 0 ? (
+                      <p className="text-xs text-[var(--reader-muted)] italic">
+                        No stickers on this page yet. Click an emoji above to place one.
+                      </p>
+                    ) : (
+                      currentStickers.map((st) => (
+                        <div
+                          key={st.id}
+                          className="p-3 rounded-xl bg-[var(--reader-surface)] border border-[var(--reader-border)] space-y-2 text-xs shadow-xs hover:border-[var(--accent-main)] transition-colors"
+                        >
+                          <div className="flex items-center justify-between">
+                            <span className="font-semibold flex items-center gap-1.5 text-sm">
+                              <span>{st.emoji}</span>
+                              <span className="text-xs font-bold text-[var(--reader-text)]">
+                                {STICKER_LABELS[st.emoji] || 'Sticker'}
+                              </span>
+                            </span>
+                            <div className="flex items-center gap-1">
+                              {editingStickerId !== st.id && (
+                                <button
+                                  onClick={() => {
+                                    setEditingStickerId(st.id);
+                                    setEditingStickerNote(st.note || '');
+                                  }}
+                                  className="px-2 py-0.5 text-[var(--reader-muted)] hover:text-[var(--accent-main)] transition-colors text-[11px] font-semibold rounded-md hover:bg-black/5 dark:hover:bg-white/10"
+                                  title="Edit note"
+                                >
+                                  {st.note ? 'Edit Note' : '+ Note'}
+                                </button>
+                              )}
+                              <button
+                                onClick={() => handleDeleteSticker(st.id)}
+                                className="p-1 text-[var(--reader-muted)] hover:text-red-500 transition-colors"
+                                title="Delete sticker"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* Inline Edit Note Form */}
+                          {editingStickerId === st.id ? (
+                            <div className="space-y-2 pt-1 border-t border-[var(--reader-border)]">
+                              <textarea
+                                rows={2}
+                                value={editingStickerNote}
+                                onChange={(e) => setEditingStickerNote(e.target.value)}
+                                placeholder="Write your note for this sticker..."
+                                className="w-full p-2 rounded-lg bg-black/5 dark:bg-white/10 text-xs text-[var(--reader-text)] border border-[var(--reader-border)] focus:outline-none focus:ring-1 focus:ring-[var(--accent-main)] resize-none"
+                                autoFocus
+                              />
+                              <div className="flex items-center justify-end gap-2">
+                                <button
+                                  onClick={() => {
+                                    setEditingStickerId(null);
+                                    setEditingStickerNote('');
+                                  }}
+                                  className="px-2 py-1 text-xs text-[var(--reader-muted)] hover:text-[var(--reader-text)]"
+                                >
+                                  Cancel
+                                </button>
+                                <button
+                                  onClick={() => handleUpdateStickerNote(st.id, editingStickerNote)}
+                                  className="px-2.5 py-1 rounded-lg bg-[var(--accent-main)] text-[var(--bg-main)] text-xs font-bold"
+                                >
+                                  Save Note
+                                </button>
+                              </div>
+                            </div>
+                          ) : st.note ? (
+                            <p className="text-xs text-[var(--reader-text)] opacity-90 p-2 rounded-lg bg-black/5 dark:bg-white/5 border border-[var(--reader-border)] font-sans">
+                              {st.note}
+                            </p>
+                          ) : null}
+                        </div>
+                      ))
+                    )}
                   </div>
                 </div>
               )}
@@ -1313,57 +1790,108 @@ export function PdfReader({ book }: PdfReaderProps) {
           onMouseUp={handleMouseUp}
           className="flex-1 h-full min-h-0 overflow-auto p-4 sm:p-8 flex justify-center items-start bg-[var(--bg-main)] relative"
         >
-          {/* PDF Page Container */}
-          <div
-            ref={pageContainerRef}
-            className="pdf-page-container relative bg-white dark:bg-stone-900 border border-[var(--reader-border)] rounded-sm shadow-2xl overflow-hidden"
-          >
-            {/* Canvas */}
-            <canvas ref={canvasRef} className="block" />
-
-            {/* Text Selection Layer */}
-            <div ref={textLayerRef} className="textLayer absolute inset-0 pointer-events-auto" />
-
-            {/* Interactive PDF Link Layer */}
-            <div ref={annotationLayerRef} className="annotationLayer absolute inset-0 pointer-events-none" />
-
-            {/* Sticker Overlay Icons */}
-            {currentStickers.map((st) => (
-              <div
-                key={st.id}
-                onPointerDown={(e) => handleStickerPointerDown(e, st)}
-                style={{
-                  position: 'absolute',
-                  left: `${st.xPercent}%`,
-                  top: `${st.yPercent}%`,
-                  transform: `translate(-50%, -50%) scale(${st.scale}) rotate(${st.rotation}deg)`,
-                  touchAction: 'none',
-                }}
-                className="text-3xl cursor-grab active:cursor-grabbing hover:scale-125 transition-transform z-20 filter drop-shadow-md select-none group"
-                title="Drag to reposition sticker"
-              >
-                <span>{st.emoji}</span>
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleDeleteSticker(st.id);
-                  }}
-                  className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-red-500 text-white rounded-full text-[10px] hidden group-hover:flex items-center justify-center shadow-md hover:bg-red-600 transition-colors"
-                  title="Remove sticker"
-                >
-                  ✕
-                </button>
+          {isDocLoading || !pdfDoc ? (
+            <div className="relative w-full max-w-2xl h-[78vh] bg-white dark:bg-stone-900 border border-[var(--reader-border)] rounded-sm shadow-2xl p-10 flex flex-col justify-between overflow-hidden animate-fadeIn">
+              <div className="absolute inset-0 skeleton-shimmer pointer-events-none" />
+              <div className="space-y-4">
+                <div className="h-6 w-1/3 bg-black/5 dark:bg-white/10 rounded-md animate-pulse" />
+                <div className="h-4 w-full bg-black/5 dark:bg-white/10 rounded-md animate-pulse" />
+                <div className="h-4 w-5/6 bg-black/5 dark:bg-white/10 rounded-md animate-pulse" />
+                <div className="h-4 w-4/5 bg-black/5 dark:bg-white/10 rounded-md animate-pulse" />
+                <div className="h-4 w-full bg-black/5 dark:bg-white/10 rounded-md animate-pulse" />
               </div>
-            ))}
-
-            {/* Bookmark Badge */}
-            {isPageBookmarked && (
-              <div className="absolute top-0 right-6 w-8 h-10 bg-amber-500 text-white flex items-center justify-center rounded-b-md shadow-md z-20">
-                <Bookmark className="w-5 h-5 fill-white" />
+              <div className="space-y-3 my-auto py-6">
+                <div className="h-4 w-11/12 bg-black/5 dark:bg-white/10 rounded-md animate-pulse" />
+                <div className="h-4 w-full bg-black/5 dark:bg-white/10 rounded-md animate-pulse" />
+                <div className="h-4 w-3/4 bg-black/5 dark:bg-white/10 rounded-md animate-pulse" />
+                <div className="h-4 w-5/6 bg-black/5 dark:bg-white/10 rounded-md animate-pulse" />
               </div>
-            )}
-          </div>
+              <div className="flex items-center justify-center gap-3 pt-4 border-t border-[var(--reader-border)]">
+                <div className="w-5 h-5 border-2 border-[var(--accent-main)] border-t-transparent rounded-full animate-spin shrink-0" />
+                <span className="font-serif-editorial text-sm font-semibold text-[var(--reader-text)]">
+                  Loading document pages...
+                </span>
+              </div>
+            </div>
+          ) : (
+            <div
+              ref={pageContainerRef}
+              className="pdf-page-container relative bg-white dark:bg-stone-900 border border-[var(--reader-border)] rounded-sm shadow-2xl overflow-visible"
+            >
+              {/* Top Page-Turn Loading Progress Bar */}
+              {isPageRendering && (
+                <div className="absolute top-0 left-0 right-0 h-1 bg-[var(--accent-main)] animate-pulse z-30 rounded-t-sm" />
+              )}
+
+              {/* Canvas */}
+              <canvas ref={canvasRef} className="block" />
+
+              {/* Text Selection Layer */}
+              <div ref={textLayerRef} className="textLayer absolute inset-0 pointer-events-auto" />
+
+              {/* Interactive PDF Link Layer */}
+              <div ref={annotationLayerRef} className="annotationLayer absolute inset-0 pointer-events-none" />
+
+              {/* Sticker Overlay Icons */}
+              {currentStickers.map((st) => {
+                const isNearLeft = st.xPercent < 25;
+                const isNearRight = st.xPercent > 75;
+                const isNearTop = st.yPercent < 15;
+
+                return (
+                  <div
+                    key={st.id}
+                    onPointerDown={(e) => handleStickerPointerDown(e, st)}
+                    style={{
+                      position: 'absolute',
+                      left: `${st.xPercent}%`,
+                      top: `${st.yPercent}%`,
+                      transform: `translate(-50%, -50%) scale(${st.scale}) rotate(${st.rotation}deg)`,
+                      touchAction: 'none',
+                    }}
+                    className="text-xl sm:text-2xl cursor-grab active:cursor-grabbing hover:scale-125 transition-transform z-20 filter drop-shadow-md select-none group"
+                    title={st.note ? `${STICKER_LABELS[st.emoji] || 'Sticker'}: ${st.note}` : `Drag to reposition (${STICKER_LABELS[st.emoji] || 'Sticker'})`}
+                  >
+                    <span>{st.emoji}</span>
+
+                    {/* Tooltip on hover if note is attached - Smart positioned to avoid clipping */}
+                    {st.note && (
+                      <div
+                        className={`absolute ${isNearTop ? 'top-full mt-2' : 'bottom-full mb-2'} ${
+                          isNearLeft
+                            ? 'left-0 translate-x-0'
+                            : isNearRight
+                            ? 'right-0 translate-x-0'
+                            : 'left-1/2 -translate-x-1/2'
+                        } hidden group-hover:block bg-stone-900/95 text-white text-[11px] font-sans font-medium px-3 py-1.5 rounded-lg shadow-2xl z-40 pointer-events-none border border-stone-700 animate-fadeIn max-w-[220px] sm:max-w-xs break-words leading-tight`}
+                      >
+                        {st.note}
+                      </div>
+                    )}
+
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleDeleteSticker(st.id);
+                      }}
+                      className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-red-500 text-white rounded-full text-[10px] hidden group-hover:flex items-center justify-center shadow-md hover:bg-red-600 transition-colors"
+                      title="Remove sticker"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                );
+              })}
+
+              {/* Bookmark Badge */}
+              {isPageBookmarked && (
+                <div className="absolute top-0 right-6 w-8 h-10 bg-amber-500 text-white flex items-center justify-center rounded-b-md shadow-md z-20">
+                  <Bookmark className="w-5 h-5 fill-white" />
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Cover / Scanned Image Page Notice */}
           {!hasTextContent && (
@@ -1462,6 +1990,26 @@ export function PdfReader({ book }: PdfReaderProps) {
                 <kbd className="px-2 py-0.5 rounded bg-stone-200 dark:bg-stone-800 font-mono">Esc</kbd>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Toast Notification */}
+      {toast && (
+        <div className="fixed bottom-6 right-6 z-50 animate-in fade-in slide-in-from-bottom-3 duration-200 pointer-events-none">
+          <div
+            className={`px-4 py-2.5 rounded-xl shadow-xl text-xs font-semibold flex items-center gap-2 border ${
+              toast.type === 'error'
+                ? 'bg-rose-500/95 text-white border-rose-600 shadow-rose-500/20'
+                : 'bg-stone-900/95 text-stone-100 dark:bg-stone-100 dark:text-stone-900 border-stone-700/50 shadow-black/20'
+            }`}
+          >
+            {toast.type === 'error' ? (
+              <span className="w-2 h-2 rounded-full bg-white animate-pulse" />
+            ) : (
+              <span className="w-2 h-2 rounded-full bg-emerald-400" />
+            )}
+            {toast.message}
           </div>
         </div>
       )}
