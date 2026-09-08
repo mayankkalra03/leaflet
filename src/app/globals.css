@@ -56,6 +56,17 @@ body {
   overflow-x: hidden;
 }
 
+/* Hide number input spinner arrows */
+input[type='number']::-webkit-inner-spin-button,
+input[type='number']::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+input[type='number'] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
 /* Custom Serif Typography Helper */
 .font-serif-editorial {
   font-family: var(--font-serif), Georgia, serif;
@@ -91,6 +102,33 @@ body {
 
 .animate-glow {
   animation: pulseGlow 4s ease-in-out infinite;
+}
+
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+.skeleton-shimmer {
+  background: linear-gradient(
+    90deg,
+    rgba(220, 215, 205, 0.2) 0%,
+    rgba(245, 240, 230, 0.6) 50%,
+    rgba(220, 215, 205, 0.2) 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.6s ease-in-out infinite;
+}
+
+.dark .skeleton-shimmer, .theme-dark .skeleton-shimmer {
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0.02) 0%,
+    rgba(255, 255, 255, 0.08) 50%,
+    rgba(255, 255, 255, 0.02) 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.6s ease-in-out infinite;
 }
 
 /* Scrollbar Customization */

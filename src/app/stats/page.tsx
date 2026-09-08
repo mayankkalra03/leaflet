@@ -60,7 +60,47 @@ export default function StatisticsPage() {
         </div>
 
         {loading ? (
-          <div className="py-20 text-center text-sm text-[var(--text-muted)]">Loading statistics...</div>
+          <div className="space-y-8 animate-fadeIn">
+            {/* Top Stat Cards Skeleton */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+              {[...Array(4)].map((_, i) => (
+                <div
+                  key={i}
+                  className="p-6 rounded-2xl bg-[var(--bg-surface)] border border-[var(--border-main)] shadow-xs space-y-3 relative overflow-hidden"
+                >
+                  <div className="absolute inset-0 skeleton-shimmer pointer-events-none" />
+                  <div className="flex items-center justify-between">
+                    <div className="h-3.5 w-24 bg-[var(--bg-card)] rounded animate-pulse" />
+                    <div className="w-4 h-4 bg-[var(--bg-card)] rounded-full animate-pulse" />
+                  </div>
+                  <div className="h-9 w-16 bg-[var(--bg-card)] rounded-md animate-pulse" />
+                  <div className="h-3 w-32 bg-[var(--bg-card)] rounded animate-pulse" />
+                </div>
+              ))}
+            </div>
+
+            {/* Content Cards Skeleton */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+              <div className="p-8 rounded-2xl bg-[var(--bg-surface)] border border-[var(--border-main)] shadow-xs space-y-4 relative overflow-hidden h-64">
+                <div className="absolute inset-0 skeleton-shimmer pointer-events-none" />
+                <div className="h-6 w-48 bg-[var(--bg-card)] rounded animate-pulse" />
+                <div className="space-y-3 pt-4">
+                  <div className="h-4 w-full bg-[var(--bg-card)] rounded animate-pulse" />
+                  <div className="h-4 w-5/6 bg-[var(--bg-card)] rounded animate-pulse" />
+                  <div className="h-4 w-4/5 bg-[var(--bg-card)] rounded animate-pulse" />
+                </div>
+              </div>
+              <div className="p-8 rounded-2xl bg-[var(--bg-surface)] border border-[var(--border-main)] shadow-xs space-y-4 relative overflow-hidden h-64">
+                <div className="absolute inset-0 skeleton-shimmer pointer-events-none" />
+                <div className="h-6 w-48 bg-[var(--bg-card)] rounded animate-pulse" />
+                <div className="space-y-3 pt-4">
+                  <div className="h-4 w-full bg-[var(--bg-card)] rounded animate-pulse" />
+                  <div className="h-4 w-5/6 bg-[var(--bg-card)] rounded animate-pulse" />
+                  <div className="h-4 w-4/5 bg-[var(--bg-card)] rounded animate-pulse" />
+                </div>
+              </div>
+            </div>
+          </div>
         ) : !stats ? (
           <div className="py-20 text-center text-sm text-[var(--text-muted)]">Could not load statistics.</div>
         ) : (

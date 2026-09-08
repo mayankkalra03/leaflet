@@ -15,11 +15,11 @@ const jakarta = Plus_Jakarta_Sans({
 });
 
 export const metadata: Metadata = {
-  title: "Leaflet — Read. Mark. Remember.",
+  title: "Leaflet | Read. Mark. Remember.",
   description: "A quieter digital reading workspace for the books and ideas worth keeping. Highlight, annotate, bookmark, add stickers, and organize your digital library.",
   keywords: ["PDF reader", "digital reading", "book library", "annotations", "highlights", "ebook workspace"],
   openGraph: {
-    title: "Leaflet — Personal Digital Reading Workspace",
+    title: "Leaflet | Personal Digital Reading Workspace",
     description: "Read, annotate, and organize your books in a quiet, editorial digital workspace.",
     type: "website",
   },

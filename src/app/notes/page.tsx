@@ -163,7 +163,29 @@ export default function NotesWorkspacePage() {
 
         {/* Notes Grid / List */}
         {loading ? (
-          <div className="py-20 text-center text-sm text-[var(--text-muted)]">Loading workspace notes...</div>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 animate-fadeIn">
+            {[...Array(6)].map((_, i) => (
+              <div
+                key={i}
+                className="p-6 rounded-2xl bg-[var(--bg-surface)] border border-[var(--border-main)] shadow-xs space-y-4 relative overflow-hidden"
+              >
+                <div className="absolute inset-0 skeleton-shimmer pointer-events-none" />
+                <div className="flex items-center justify-between">
+                  <div className="h-4 w-32 bg-[var(--bg-card)] rounded-md animate-pulse" />
+                  <div className="h-4 w-16 bg-[var(--bg-card)] rounded-md animate-pulse" />
+                </div>
+                <div className="space-y-2 p-3 rounded-xl bg-[var(--bg-card)]/70">
+                  <div className="h-4 w-full bg-[var(--border-main)]/50 rounded-md animate-pulse" />
+                  <div className="h-4 w-4/5 bg-[var(--border-main)]/50 rounded-md animate-pulse" />
+                  <div className="h-4 w-2/3 bg-[var(--border-main)]/50 rounded-md animate-pulse" />
+                </div>
+                <div className="pt-3 border-t border-[var(--border-main)] flex items-center justify-between">
+                  <div className="h-4 w-20 bg-[var(--bg-card)] rounded-md animate-pulse" />
+                  <div className="w-5 h-5 bg-[var(--bg-card)] rounded-full animate-pulse" />
+                </div>
+              </div>
+            ))}
+          </div>
         ) : notes.length === 0 ? (
           <div className="py-20 text-center max-w-md mx-auto space-y-4 rounded-2xl border border-dashed border-[var(--border-main)] p-8">
             <div className="w-12 h-12 rounded-xl bg-[var(--bg-card)] text-[var(--text-muted)] mx-auto flex items-center justify-center">

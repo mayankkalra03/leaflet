@@ -277,7 +277,31 @@ export default function DashboardPage() {
 
         {/* Books List Grid / Empty State */}
         {loading ? (
-          <div className="py-20 text-center text-sm text-[var(--text-muted)]">Loading library...</div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6 animate-fadeIn">
+            {[...Array(8)].map((_, i) => (
+              <div
+                key={i}
+                className="rounded-2xl bg-[var(--bg-surface)] border border-[var(--border-main)] overflow-hidden shadow-xs p-5 space-y-4 relative"
+              >
+                <div className="absolute inset-0 skeleton-shimmer pointer-events-none" />
+                <div className="flex items-center justify-between">
+                  <div className="w-6 h-6 rounded-full bg-[var(--bg-card)] animate-pulse" />
+                  <div className="w-14 h-5 rounded-full bg-[var(--bg-card)] animate-pulse" />
+                </div>
+                <div className="h-28 rounded-xl bg-[var(--bg-card)]/80 flex items-center justify-center animate-pulse">
+                  <div className="w-8 h-8 rounded-lg bg-[var(--border-main)]/60" />
+                </div>
+                <div className="space-y-2 pt-1">
+                  <div className="h-5 w-3/4 bg-[var(--bg-card)] rounded-md animate-pulse" />
+                  <div className="h-3.5 w-1/2 bg-[var(--bg-card)] rounded-md animate-pulse" />
+                </div>
+                <div className="pt-3 border-t border-[var(--border-main)] flex items-center justify-between">
+                  <div className="h-3 w-16 bg-[var(--bg-card)] rounded-md animate-pulse" />
+                  <div className="h-7 w-20 bg-[var(--bg-card)] rounded-lg animate-pulse" />
+                </div>
+              </div>
+            ))}
+          </div>
         ) : books.length === 0 ? (
           <div className="py-20 text-center max-w-md mx-auto space-y-4 rounded-2xl border border-dashed border-[var(--border-main)] p-8">
             <div className="w-12 h-12 rounded-xl bg-[var(--bg-card)] text-[var(--text-muted)] mx-auto flex items-center justify-center">
