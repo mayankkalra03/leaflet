@@ -47,6 +47,7 @@ interface BookItem {
 
 export default function DashboardPage() {
   const [books, setBooks] = useState<BookItem[]>([]);
+  const [continueBook, setContinueBook] = useState<BookItem | null>(null);
   const [user, setUser] = useState<{ name: string } | null>(null);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -61,7 +62,7 @@ export default function DashboardPage() {
       setLoading(true);
       const [meRes, booksRes] = await Promise.all([
         fetch('/api/auth/me'),
-        fetch(`/api/books?search=${encodeURIComponent(search)}&favorite=${filterFavorite}&sort=${sort}`),
+        fetch(`/api/books?favorite=${filterFavorite}&sort=${sort}`),
       ]);
 
       if (meRes.ok) {
@@ -71,7 +72,17 @@ export default function DashboardPage() {
 
       if (booksRes.ok) {
         const booksData = await booksRes.json();
-        setBooks(booksData.books || []);
+        const fetchedBooks: BookItem[] = booksData.books || [];
+        setBooks(fetchedBooks);
+
+        // Calculate the true most recently read book across the library
+        const sortedByRead = [...fetchedBooks].sort((a, b) => {
+          const timeA = a.progress?.lastReadAt ? new Date(a.progress.lastReadAt).getTime() : new Date(a.updatedAt).getTime();
+          const timeB = b.progress?.lastReadAt ? new Date(b.progress.lastReadAt).getTime() : new Date(b.updatedAt).getTime();
+          return timeB - timeA;
+        });
+
+        setContinueBook(sortedByRead[0] || null);
       }
     } catch (err) {
       console.error(err);
@@ -82,7 +93,7 @@ export default function DashboardPage() {
 
   useEffect(() => {
     fetchUserAndBooks();
-  }, [search, filterFavorite, sort]);
+  }, [filterFavorite, sort]);
 
   const handleToggleFavorite = async (id: string, currentFav: boolean) => {
     try {
@@ -133,8 +144,14 @@ export default function DashboardPage() {
     }
   };
 
-  // Find Continue Reading Book (last read)
-  const continueBook = books.length > 0 ? books[0] : null;
+  // 100% Guaranteed Instant Case-Insensitive Filtered Books
+  const displayBooks = books.filter((book) => {
+    if (!search.trim()) return true;
+    const query = search.toLowerCase().trim();
+    const titleMatch = (book.title || '').toLowerCase().includes(query);
+    const authorMatch = (book.author || '').toLowerCase().includes(query);
+    return titleMatch || authorMatch;
+  });
 
   return (
     <div className="min-h-screen bg-[var(--bg-main)] text-[var(--text-main)] flex flex-col font-sans">
@@ -302,33 +319,63 @@ export default function DashboardPage() {
               </div>
             ))}
           </div>
-        ) : books.length === 0 ? (
-          <div className="py-20 text-center max-w-md mx-auto space-y-4 rounded-2xl border border-dashed border-[var(--border-main)] p-8">
-            <div className="w-12 h-12 rounded-xl bg-[var(--bg-card)] text-[var(--text-muted)] mx-auto flex items-center justify-center">
-              <Book className="w-6 h-6" />
+        ) : displayBooks.length === 0 ? (
+          search || filterFavorite ? (
+            <div className="py-16 text-center max-w-md mx-auto space-y-4 rounded-2xl border border-dashed border-[var(--border-main)] p-8 bg-[var(--bg-surface)]">
+              <div className="w-12 h-12 rounded-xl bg-[var(--bg-card)] text-[var(--text-muted)] mx-auto flex items-center justify-center">
+                <Search className="w-6 h-6" />
+              </div>
+              <h3 className="font-serif-editorial text-2xl font-bold">No books found</h3>
+              <p className="text-sm text-[var(--text-muted)]">
+                {search ? `No books match "${search}". Try searching for another title or author.` : 'No favorite books found in your library.'}
+              </p>
+              <div className="flex items-center justify-center gap-3 pt-2">
+                {search && (
+                  <button
+                    onClick={() => setSearch('')}
+                    className="px-4 py-2 rounded-xl bg-[var(--text-main)] text-[var(--bg-main)] text-xs font-semibold hover:bg-[var(--accent-main)] transition-colors"
+                  >
+                    Clear Search
+                  </button>
+                )}
+                {filterFavorite && (
+                  <button
+                    onClick={() => setFilterFavorite(false)}
+                    className="px-4 py-2 rounded-xl border border-[var(--border-main)] text-xs font-semibold hover:bg-[var(--bg-card)] transition-colors"
+                  >
+                    Show All Books
+                  </button>
+                )}
+              </div>
             </div>
-            <h3 className="font-serif-editorial text-2xl font-bold">Your library is empty</h3>
-            <p className="text-sm text-[var(--text-muted)]">
-              Upload your first PDF book or open our built-in interactive demo volume to start reading.
-            </p>
-            <div className="flex items-center justify-center gap-3 pt-2">
-              <button
-                onClick={handleLaunchDemo}
-                className="px-4 py-2 rounded-xl bg-[var(--text-main)] text-[var(--bg-main)] text-xs font-semibold hover:bg-[var(--accent-main)] transition-colors"
-              >
-                Open Demo Reader
-              </button>
-              <button
-                onClick={() => setIsUploadOpen(true)}
-                className="px-4 py-2 rounded-xl border border-[var(--border-main)] text-xs font-semibold hover:bg-[var(--bg-card)] transition-colors"
-              >
-                Upload PDF
-              </button>
+          ) : (
+            <div className="py-20 text-center max-w-md mx-auto space-y-4 rounded-2xl border border-dashed border-[var(--border-main)] p-8">
+              <div className="w-12 h-12 rounded-xl bg-[var(--bg-card)] text-[var(--text-muted)] mx-auto flex items-center justify-center">
+                <Book className="w-6 h-6" />
+              </div>
+              <h3 className="font-serif-editorial text-2xl font-bold">Your library is empty</h3>
+              <p className="text-sm text-[var(--text-muted)]">
+                Upload your first PDF book or open our built-in interactive demo volume to start reading.
+              </p>
+              <div className="flex items-center justify-center gap-3 pt-2">
+                <button
+                  onClick={handleLaunchDemo}
+                  className="px-4 py-2 rounded-xl bg-[var(--text-main)] text-[var(--bg-main)] text-xs font-semibold hover:bg-[var(--accent-main)] transition-colors"
+                >
+                  Open Demo Reader
+                </button>
+                <button
+                  onClick={() => setIsUploadOpen(true)}
+                  className="px-4 py-2 rounded-xl border border-[var(--border-main)] text-xs font-semibold hover:bg-[var(--bg-card)] transition-colors"
+                >
+                  Upload PDF
+                </button>
+              </div>
             </div>
-          </div>
+          )
         ) : viewMode === 'grid' ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
-            {books.map((book) => (
+            {displayBooks.map((book) => (
               <div
                 key={book.id}
                 className="group rounded-2xl bg-[var(--bg-surface)] border border-[var(--border-main)] overflow-hidden shadow-xs hover:shadow-xl transition-all duration-300 flex flex-col justify-between relative"
@@ -415,7 +462,7 @@ export default function DashboardPage() {
           </div>
         ) : (
           <div className="bg-[var(--bg-surface)] rounded-2xl border border-[var(--border-main)] divide-y divide-[var(--border-main)] shadow-xs">
-            {books.map((book) => (
+            {displayBooks.map((book) => (
               <div key={book.id} className="p-4 flex items-center justify-between gap-4 hover:bg-[var(--bg-card)] transition-colors">
                 <div className="flex items-center gap-4">
                   <button

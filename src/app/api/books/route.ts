@@ -1,34 +1,38 @@
 import { NextResponse } from 'next/server';
-import { getAuthUser } from '@/lib/auth';
+import { getAuthUser, getEffectiveUser } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { saveFile } from '@/lib/storage';
 import { PDFDocument } from 'pdf-lib';
 
 export async function GET(req: Request) {
   try {
-    const session = await getAuthUser();
-    if (!session) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    const user = await getEffectiveUser();
+    if (!user) {
+      return NextResponse.json({ books: [] });
     }
 
     const { searchParams } = new URL(req.url);
-    const search = searchParams.get('search') || '';
+    const search = (searchParams.get('search') || '').trim();
     const favorite = searchParams.get('favorite');
     const sort = searchParams.get('sort') || 'recent';
 
     const where: any = {
-      userId: session.userId,
+      userId: user.userId,
     };
-
-    if (search) {
-      where.OR = [
-        { title: { contains: search } },
-        { author: { contains: search } },
-      ];
-    }
 
     if (favorite === 'true') {
       where.isFavorite = true;
+    }
+
+    if (search) {
+      where.AND = [
+        {
+          OR: [
+            { title: { contains: search, mode: 'insensitive' } },
+            { author: { contains: search, mode: 'insensitive' } },
+          ],
+        },
+      ];
     }
 
     let orderBy: any = { updatedAt: 'desc' };
@@ -43,7 +47,7 @@ export async function GET(req: Request) {
       orderBy,
       include: {
         progress: {
-          where: { userId: session.userId },
+          where: { userId: user.userId },
         },
         _count: {
           select: {
