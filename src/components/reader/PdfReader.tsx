@@ -476,6 +476,11 @@ export function PdfReader({ book }: PdfReaderProps) {
 
       setIsPageRendering(true);
 
+      // Scroll reader viewport to top when beginning to render a page
+      if (containerRef.current) {
+        containerRef.current.scrollTop = 0;
+      }
+
       try {
         const page = await pdfDoc.getPage(pageNumber);
         const viewport = page.getViewport({ scale });
@@ -505,6 +510,9 @@ export function PdfReader({ book }: PdfReaderProps) {
 
         try {
           await renderTask.promise;
+          if (containerRef.current) {
+            containerRef.current.scrollTop = 0;
+          }
         } catch (renderErr: any) {
           if (renderErr?.name === 'RenderingCancelledException') {
             return;
@@ -603,6 +611,27 @@ export function PdfReader({ book }: PdfReaderProps) {
     },
     [pdfDoc, scale]
   );
+
+  // Automatically scroll reader viewport to top whenever navigating to another page
+  useEffect(() => {
+    const scrollToTop = () => {
+      if (containerRef.current) {
+        containerRef.current.scrollTop = 0;
+      }
+      if (typeof window !== 'undefined') {
+        window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+      }
+    };
+
+    scrollToTop();
+    const rafId = requestAnimationFrame(scrollToTop);
+    const timeoutId = setTimeout(scrollToTop, 50);
+
+    return () => {
+      cancelAnimationFrame(rafId);
+      clearTimeout(timeoutId);
+    };
+  }, [currentPage]);
 
   useEffect(() => {
     renderPage(currentPage);

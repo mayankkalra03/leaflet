@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Playfair_Display, Plus_Jakarta_Sans } from "next/font/google";
 import "./globals.css";
+import { RouteScrollToTop } from "@/components/RouteScrollToTop";
 
 const playfair = Playfair_Display({
   subsets: ["latin"],
@@ -36,6 +37,7 @@ export default function RootLayout({
       className={`${playfair.variable} ${jakarta.variable} antialiased`}
     >
       <body className="min-h-screen bg-[var(--bg-main)] text-[var(--text-main)] font-sans selection:bg-[var(--accent-light)] selection:text-[var(--accent-main)]">
+        <RouteScrollToTop />
         {children}
       </body>
     </html>
